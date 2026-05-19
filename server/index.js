@@ -835,10 +835,27 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
       res.setHeader('Content-Range', response.headers['content-range']);
     }
     res.setHeader('Accept-Ranges', 'bytes');
-    response.data.pipe(res);
+
+    const upstream = response.data;
+    upstream.on('error', (streamError) => {
+      console.warn('Audio upstream stream error:', streamError.message);
+      if (!res.headersSent) {
+        res.status(502).json({ error: '音频源连接中断' });
+      } else {
+        res.destroy(streamError);
+      }
+    });
+    res.on('close', () => {
+      if (!upstream.destroyed) upstream.destroy();
+    });
+    upstream.pipe(res);
   } catch (e) {
     console.error('Audio stream error:', e.message, e.response?.status);
-    res.status(500).json({ error: '音频流获取失败' });
+    if (!res.headersSent) {
+      res.status(502).json({ error: '音频流获取失败' });
+    } else {
+      res.destroy(e);
+    }
   }
 });
 
