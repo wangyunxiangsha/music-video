@@ -418,11 +418,11 @@
 
   audio.onerror = () => {
     if (S.userRequested) {
-      // User explicitly asked for this song — don't auto-skip, show explanation
+      // User explicitly asked for this song, so explain before letting them choose again.
       S.userRequested = false;
       const name = S.track?.name || '该歌曲';
       console.warn(`User-requested track failed: ${name}`);
-      addBubble('dj', `《${name}》在当前平台没有可播放的版权，试试换一首？`);
+      addBubble('dj', `《${name}》当前音源暂时打不开，可能是链接过期或平台临时限制。试试换一首？`);
       if (!S.chatOpen) {
         // Briefly open chat so user sees the message
         S.chatOpen = true;
@@ -431,7 +431,7 @@
       }
     } else {
       console.warn('Audio error — requesting next track');
-      requestNextTrack(`《${S.track?.name || '该歌曲'}》暂时没有可播放版权，马上换下一首。`);
+      requestNextTrack(`《${S.track?.name || '该歌曲'}》当前音源暂时打不开，已跳过。`);
     }
   };
 
