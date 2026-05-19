@@ -22,6 +22,7 @@ const djPolicy  = require('./dj-policy');
 const queue     = require('./queue');
 const dailyStation = require('./daily-station');
 const recommendationMixer = require('./recommendation-mixer');
+const playability = require('./playability');
 
 const app = express();
 const server = http.createServer(app);
@@ -549,7 +550,16 @@ async function nextTrack() {
     playlist = [...MOCK_PLAYLIST];
   }
 
-  currentTrack = playlist.shift();
+  const picked = await playability.pickPlayableTrack({
+    playlist,
+    resolveUrl: resolveSongUrl,
+    maxAttempts: 8
+  });
+  playlist = picked.remaining;
+  if (picked.skipped.length) {
+    console.warn(`跳过 ${picked.skipped.length} 首暂不可播放的候选，继续寻找下一首`);
+  }
+  currentTrack = picked.track || playlist.shift();
   if (!currentTrack) return;
 
   stats.savePlay(currentTrack);

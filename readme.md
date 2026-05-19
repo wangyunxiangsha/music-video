@@ -337,12 +337,16 @@ npm run sync
 ```env
 QQ_CIRCUIT_THRESHOLD=3
 QQ_CIRCUIT_COOLDOWN_MS=600000
+QQ_UNAVAILABLE_CACHE_MS=900000
+# QQ_DEBUG_URL=1
 ```
 
 | 变量 | 说明 |
 |------|------|
 | `QQ_CIRCUIT_THRESHOLD` | 连续失败多少次后打开熔断 |
 | `QQ_CIRCUIT_COOLDOWN_MS` | 熔断持续时间，默认 10 分钟 |
+| `QQ_UNAVAILABLE_CACHE_MS` | 单首 QQ 歌曲失败后的短期跳过缓存，默认 15 分钟 |
+| `QQ_DEBUG_URL` | 设为 `1` 时输出每个 QQ 音质格式的详细 probe 日志 |
 
 调试接口：
 

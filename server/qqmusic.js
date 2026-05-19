@@ -4,6 +4,9 @@ const axios = require('axios');
 const QQ_COOKIE = process.env.QQ_MUSIC_COOKIE || '';
 const QQ_CIRCUIT_THRESHOLD = Number(process.env.QQ_CIRCUIT_THRESHOLD || 3);
 const QQ_CIRCUIT_COOLDOWN_MS = Number(process.env.QQ_CIRCUIT_COOLDOWN_MS || 10 * 60 * 1000);
+const QQ_URL_CACHE_MS = Number(process.env.QQ_URL_CACHE_MS || 5 * 60 * 1000);
+const QQ_UNAVAILABLE_CACHE_MS = Number(process.env.QQ_UNAVAILABLE_CACHE_MS || 15 * 60 * 1000);
+const QQ_DEBUG_URL = process.env.QQ_DEBUG_URL === '1';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -16,6 +19,8 @@ const circuit = {
   openUntil: 0,
   lastReason: ''
 };
+const urlCache = new Map();
+const unavailableCache = new Map();
 
 function circuitRemainingMs() {
   return Math.max(0, circuit.openUntil - Date.now());
@@ -50,6 +55,16 @@ function getCircuitState() {
     threshold: QQ_CIRCUIT_THRESHOLD,
     cooldownMs: QQ_CIRCUIT_COOLDOWN_MS
   };
+}
+
+function getCachedEntry(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return entry;
 }
 
 function qqGtk(cookie) {
@@ -158,6 +173,10 @@ async function getSongUrl(songmid) {
     console.warn('QQ_MUSIC_COOKIE 未配置，无法获取 QQ 音乐链接');
     return null;
   }
+  const cachedUrl = getCachedEntry(urlCache, songmid);
+  if (cachedUrl) return cachedUrl.url;
+  const unavailable = getCachedEntry(unavailableCache, songmid);
+  if (unavailable) return null;
   if (isCircuitOpen()) {
     console.warn(`QQ Music circuit breaker active, skip URL probe (${Math.ceil(circuitRemainingMs() / 1000)}s left)`);
     return null;
@@ -212,21 +231,26 @@ async function getSongUrl(songmid) {
         headers: { ...HEADERS, Cookie: QQ_COOKIE, Range: 'bytes=0-0' },
         responseType: 'arraybuffer',
         timeout: 5000,
-        validateStatus: (s) => s === 200 || s === 206
+        validateStatus: () => true
       });
       if (probe.status === 200 || probe.status === 206) {
         console.log(`QQ Music URL 成功 (${quality}): ${url.substring(0, 80)}...`);
         resetCircuit();
+        urlCache.set(songmid, { url, expiresAt: Date.now() + QQ_URL_CACHE_MS });
         return url;
       }
       lastError = `${quality}: CDN HTTP ${probe.status}`;
-      console.warn(`QQ Music CDN probe 拒绝 (${quality}): HTTP ${probe.status}`);
+      if (QQ_DEBUG_URL) console.warn(`QQ Music CDN probe 拒绝 (${quality}): HTTP ${probe.status}`);
     } catch (e) {
       lastError = `${quality}: ${e.message}`;
-      console.warn(`QQ Music URL (${quality}) error:`, e.message);
+      if (QQ_DEBUG_URL) console.warn(`QQ Music URL (${quality}) error:`, e.message);
     }
   }
-  console.warn(`QQ Music 所有格式均失败 (songmid: ${songmid})`);
+  unavailableCache.set(songmid, {
+    reason: lastError || `all formats failed: ${songmid}`,
+    expiresAt: Date.now() + QQ_UNAVAILABLE_CACHE_MS
+  });
+  console.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${lastError || 'all formats failed'})`);
   recordCircuitFailure(lastError || `all formats failed: ${songmid}`);
   return null;
 }
