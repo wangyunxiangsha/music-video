@@ -119,9 +119,12 @@
     <section class="queue-strip" aria-label="播放队列">
       <div class="queue-head">
         <span>QUEUE</span>
-        <strong id="queue-count">0 TRACKS</strong>
+        <div class="queue-meta">
+          <strong id="queue-count">0 TRACKS</strong>
+          <button id="queue-toggle" class="queue-toggle" type="button" aria-expanded="true" aria-controls="queue-actions queue-list" title="收起歌单">HIDE</button>
+        </div>
       </div>
-      <div class="queue-actions">
+      <div class="queue-actions" id="queue-actions">
         <button id="queue-skip" type="button" title="删除下一首">DROP</button>
         <button id="queue-rebuild" type="button" title="重新生成队列">RESHUFFLE</button>
         <button id="queue-insert" type="button" title="把输入框歌曲插到下一首">INSERT</button>

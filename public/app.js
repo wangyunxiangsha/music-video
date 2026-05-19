@@ -12,6 +12,7 @@
     lyricLines:    [],
     userRequested: false,
     queue:         null,
+    queueCollapsed:false,
     dailyBriefingKey: '',
   };
 
@@ -63,8 +64,10 @@
   const historyArtists = $('history-artists');
   const historyCategories = $('history-categories');
   const historyList = $('history-list');
+  const queueStrip = document.querySelector('.queue-strip');
   const queueCount = $('queue-count');
   const queueList = $('queue-list');
+  const queueToggle = $('queue-toggle');
   const queueSkip = $('queue-skip');
   const queueRebuild = $('queue-rebuild');
   const queueInsert = $('queue-insert');
@@ -221,6 +224,35 @@
       </div>
       <span class="queue-empty">${escapeHtml(message)}</span>
     `;
+  }
+
+  function saveQueueCollapsed() {
+    try {
+      localStorage.setItem('claudio.queueCollapsed', S.queueCollapsed ? '1' : '0');
+    } catch {}
+  }
+
+  function applyQueueCollapsed() {
+    if (!queueStrip || !queueToggle) return;
+    queueStrip.classList.toggle('collapsed', S.queueCollapsed);
+    queueToggle.textContent = S.queueCollapsed ? 'SHOW' : 'HIDE';
+    queueToggle.title = S.queueCollapsed ? '展开歌单' : '收起歌单';
+    queueToggle.setAttribute('aria-expanded', String(!S.queueCollapsed));
+  }
+
+  function initQueueCollapse() {
+    if (!queueToggle) return;
+    try {
+      S.queueCollapsed = localStorage.getItem('claudio.queueCollapsed') === '1';
+    } catch {
+      S.queueCollapsed = false;
+    }
+    applyQueueCollapsed();
+    queueToggle.onclick = () => {
+      S.queueCollapsed = !S.queueCollapsed;
+      applyQueueCollapsed();
+      saveQueueCollapsed();
+    };
   }
 
   function showDailyBriefing(briefing) {
@@ -841,6 +873,7 @@
 
   // ─── Init ──────────────────────────────────────────────────────────────────
   async function init() {
+    initQueueCollapse();
     updateClock();
     setInterval(updateClock, 15000);
     try {
