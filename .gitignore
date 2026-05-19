@@ -1,0 +1,7 @@
+node_modules/
+.env
+data/
+*.log
+.claude/
+qq-playlist-curl.txt.txt
+source/*.mp4

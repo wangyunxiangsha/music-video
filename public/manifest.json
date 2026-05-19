@@ -1,0 +1,25 @@
+{
+  "name": "Claudio FM — 个人 AI 电台",
+  "short_name": "Claudio FM",
+  "description": "你的个人 AI 复古电台，像 DJ 那样播报",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#120900",
+  "theme_color": "#120900",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Ccircle cx='96' cy='96' r='96' fill='%23120900'/%3E%3Ccircle cx='96' cy='96' r='60' fill='%231e1005' stroke='%23c9a24e' stroke-width='2'/%3E%3Ccircle cx='96' cy='96' r='20' fill='%23c88c28'/%3E%3Ccircle cx='96' cy='96' r='5' fill='%23120900'/%3E%3Ctext x='96' y='168' text-anchor='middle' fill='%23c9a24e' font-size='14' font-family='serif' letter-spacing='3'%3ECLAUDIO%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Ccircle cx='256' cy='256' r='256' fill='%23120900'/%3E%3Ccircle cx='256' cy='256' r='160' fill='%231e1005' stroke='%23c9a24e' stroke-width='4'/%3E%3Ccircle cx='256' cy='256' r='55' fill='%23c88c28'/%3E%3Ccircle cx='256' cy='256' r='14' fill='%23120900'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["music", "entertainment"]
+}

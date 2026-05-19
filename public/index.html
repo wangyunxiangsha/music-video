@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>CLAUDIO.FM</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#120900">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Claudio FM">
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+  <div class="app loading" id="app">
+
+    <header class="header">
+      <div class="brand">
+        <img
+          class="brand-avatar"
+          id="station-avatar"
+          src="avatar.jpg"
+          alt=""
+        >
+        <div>
+          <div class="station-name">Claudio</div>
+          <div class="tagline"><span class="live-dot"></span><span id="station-status">Speaking...</span></div>
+        </div>
+      </div>
+      <div class="timebox">
+        <div class="clock" id="clock">--:--</div>
+        <div class="header-date" id="header-date">--</div>
+        <div class="header-weather" id="header-weather">天气加载中</div>
+      </div>
+      <div class="theme-pills" aria-hidden="true">
+        <span>LOGIN</span>
+        <span class="active">DARK</span>
+        <span>LIGHT</span>
+      </div>
+    </header>
+
+    <section class="hero-panel">
+      <div class="dot-grid"></div>
+      <div class="hero-time" id="hero-time">--:--</div>
+      <div class="hero-day" id="hero-day">CLAUDIO FM</div>
+      <div class="hero-date" id="hero-date">CONNECTED</div>
+      <div class="on-air"><span></span> ON AIR</div>
+      <div class="melody-stage" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </section>
+
+    <section class="deck">
+      <div class="track-row">
+        <div class="vinyl-wrap">
+          <div class="vinyl" id="vinyl">
+            <div class="vinyl-center">
+              <img
+                id="cover"
+                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='82' height='82' viewBox='0 0 82 82'%3E%3Ccircle cx='41' cy='41' r='41' fill='%23161a1f'/%3E%3Ctext x='41' y='50' text-anchor='middle' font-size='28' fill='%2331f2a2'%3E♪%3C/text%3E%3C/svg%3E"
+                alt="Album Art"
+              >
+              <div class="vinyl-hole"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="song-info">
+          <div class="song-title" id="song-title">正在连接电台…</div>
+          <div class="song-artist" id="song-artist">CLAUDIO FM</div>
+          <div class="song-album" id="song-album"></div>
+        </div>
+      </div>
+
+      <div class="progress">
+        <span id="t-cur">0:00</span>
+        <div class="bar" id="bar">
+          <div class="fill" id="fill"></div>
+        </div>
+        <span id="t-end">0:00</span>
+      </div>
+
+      <div class="waveform" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+
+      <div class="controls">
+        <button id="btn-like" class="feedback-btn" title="喜欢这首">LIKE</button>
+        <button id="btn-prev" title="重播 / 上一首">‹</button>
+        <button id="btn-play" title="播放 / 暂停">▶</button>
+        <button id="btn-next" title="下一首">›</button>
+        <button id="btn-dislike" class="feedback-btn" title="少放这首">LESS</button>
+      </div>
+
+      <div class="volume">
+        <span>VOL</span>
+        <input type="range" id="vol" min="0" max="1" step="0.01" value="0.8">
+        <span id="vol-pct">80%</span>
+      </div>
+    </section>
+
+    <section class="queue-strip">
+      <span>QUEUE</span>
+      <span>0 TRACKS</span>
+    </section>
+
+    <div class="dj-channel">
+      <div class="channel-head">
+        <span class="live-dot"></span>
+        <span>Claudio</span>
+        <span>LIVE</span>
+      </div>
+      <div class="connection">Connected to Claudio server</div>
+    </div>
+
+    <div class="dj-box">
+      <span class="dj-tag">CLAUDIO</span>
+      <p id="dj-text">欢迎收听 Claudio FM，你的个人 AI 电台<span class="cursor"></span></p>
+    </div>
+
+    <!-- Chat Panel (hidden by default) -->
+    <div class="chat" id="chat" style="display:none">
+      <div class="chat-msgs" id="chat-msgs">
+        <div class="bubble dj">嗨，我是 Claudio。有什么想聊的或者想听的歌，告诉我~</div>
+      </div>
+    </div>
+
+    <div class="command-row">
+      <input type="text" id="quick-in" value="" placeholder="Say something to the DJ..." aria-label="DJ command" maxlength="200" autocomplete="off">
+      <button id="quick-mic" type="button" title="语音输入">MIC</button>
+      <button id="quick-send" type="button" title="发送">↑</button>
+    </div>
+
+    <!-- Footer Nav -->
+    <footer>
+      <button id="btn-chat" title="聊天 / 点歌">CHAT</button>
+      <button id="btn-tts" title="语音播报" class="active">VOICE</button>
+      <button id="btn-lyric" title="查看歌词">LYRIC</button>
+      <button id="btn-history" title="播放历史">HIST</button>
+      <button id="btn-taste" title="从歌单生成品味档案">TASTE</button>
+    </footer>
+
+  </div><!-- .app -->
+
+  <!-- Lyric Overlay -->
+  <div class="lyric-overlay" id="lyric-overlay">
+    <div class="lyric-scroll" id="lyric-scroll"></div>
+    <button id="lyric-close">✕</button>
+  </div>
+
+  <div class="history-overlay" id="history-overlay" aria-hidden="true">
+    <div class="history-panel">
+      <button id="history-close" title="关闭">✕</button>
+      <div class="history-head">
+        <span>HISTORY</span>
+        <strong>播放历史</strong>
+      </div>
+      <div class="history-stats" id="history-stats"></div>
+      <div class="history-grid">
+        <section>
+          <h2>常听歌手</h2>
+          <div id="history-artists" class="history-bars"></div>
+        </section>
+        <section>
+          <h2>常听类型</h2>
+          <div id="history-categories" class="history-bars"></div>
+        </section>
+      </div>
+      <section class="history-recent">
+        <h2>最近播放</h2>
+        <div id="history-list"></div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Hidden audio -->
+  <audio id="audio" preload="none"></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>
