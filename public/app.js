@@ -205,6 +205,24 @@
     `).join('');
   }
 
+  function renderQueueFallback(nextTrack, message = '完整队列需要重启服务后同步') {
+    if (queueCount) queueCount.textContent = nextTrack ? '1 TRACK' : '0 TRACKS';
+    if (!queueList) return;
+    if (!nextTrack) {
+      queueList.innerHTML = `<span class="queue-empty">${escapeHtml(message)}</span>`;
+      return;
+    }
+    const artist = artistOf(nextTrack);
+    queueList.innerHTML = `
+      <div class="queue-item">
+        <span>01</span>
+        <strong title="${escapeHtml(nextTrack.name)}">${escapeHtml(nextTrack.name || '未知歌曲')}</strong>
+        <em title="${escapeHtml(artist)}">${escapeHtml(artist || '未知歌手')}</em>
+      </div>
+      <span class="queue-empty">${escapeHtml(message)}</span>
+    `;
+  }
+
   function showDailyBriefing(briefing) {
     if (!briefing?.text || briefing.key === S.dailyBriefingKey) return;
     S.dailyBriefingKey = briefing.key || briefing.text;
@@ -215,10 +233,17 @@
   async function refreshQueue() {
     try {
       const res = await fetch('/api/queue?limit=5');
+      if (!res.ok) throw new Error(`queue ${res.status}`);
       const data = await res.json();
       renderQueue(data);
     } catch {
-      if (queueList) queueList.innerHTML = '<span class="queue-empty">队列暂时无法同步</span>';
+      try {
+        const nowRes = await fetch('/api/now');
+        const nowData = await nowRes.json();
+        renderQueueFallback(nowData.next, '当前服务需重启后同步完整队列');
+      } catch {
+        renderQueueFallback(null, '队列暂时无法同步');
+      }
     }
   }
 
