@@ -12,6 +12,7 @@
     lyricLines:    [],
     userRequested: false,
     queue:         null,
+    dailyBriefingKey: '',
   };
 
   // ─── DOM ───────────────────────────────────────────────────────────────────
@@ -204,6 +205,13 @@
     `).join('');
   }
 
+  function showDailyBriefing(briefing) {
+    if (!briefing?.text || briefing.key === S.dailyBriefingKey) return;
+    S.dailyBriefingKey = briefing.key || briefing.text;
+    typewriter(briefing.text);
+    addBubble('dj', briefing.text);
+  }
+
   async function refreshQueue() {
     try {
       const res = await fetch('/api/queue?limit=5');
@@ -247,6 +255,7 @@
       if ('djMessage' in d) typewriter(d.djMessage || '');
       if ('weather' in d) updateWeather(d.weather);
       if ('queue' in d) renderQueue(d.queue);
+      if ('dailyBriefing' in d) showDailyBriefing(d.dailyBriefing);
     } else if (d.type === 'chat' && d.reply) {
       addBubble('dj', d.reply);
     } else if (d.type === 'queue' && d.queue) {
@@ -817,6 +826,7 @@
       if ('weather' in data) updateWeather(data.weather);
       if ('queue' in data) renderQueue(data.queue);
       else refreshQueue();
+      if ('dailyBriefing' in data) showDailyBriefing(data.dailyBriefing);
     } catch {
       songTitle.textContent = '正在连接…';
     }

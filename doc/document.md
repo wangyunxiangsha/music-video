@@ -116,3 +116,22 @@
 | `doc/standard.md` | 补充前端队列预览必须消费 `/api/queue`、队列编辑必须走队列 API 的规范 |
 | `doc/summary.md` | 补充队列阶段摘要和剩余风险 |
 | `doc/talk.md` | 记录实现范围、验证命令和剩余风险 |
+
+---
+
+## 2026-05-19：每日 / 时段自动电台简报
+
+### 更新原因
+
+根据下一阶段路线，继续实现每日 / 时段自动电台，让 Claudio FM 在启动或首次打开时给出更贴合当前时间、天气、作息和近期偏好的私人开场。
+
+### 已更新文档
+
+| 文档 | 更新内容 |
+|------|----------|
+| `docs/superpowers/plans/2026-05-19-daily-station-briefing.md` | 新增本阶段实施计划 |
+| `readme.md` | 新增每日 / 时段自动电台简报说明和 `/api/daily-briefing` 接口 |
+| `doc/plan.md` | 将每日私人电台简报标记为已完成 |
+| `doc/standard.md` | 补充每日简报必须统一由 `server/daily-station.js` 判断时段和兜底的规范 |
+| `doc/summary.md` | 补充每日简报阶段摘要和剩余风险 |
+| `doc/talk.md` | 记录实现范围、验证命令和剩余风险 |

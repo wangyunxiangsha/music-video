@@ -20,6 +20,7 @@ const feedback  = require('./feedback');
 const scenes    = require('./scenes');
 const djPolicy  = require('./dj-policy');
 const queue     = require('./queue');
+const dailyStation = require('./daily-station');
 
 const app = express();
 const server = http.createServer(app);
@@ -48,6 +49,7 @@ let weatherText = '';
 let activeScene = null;
 let activePolicy = djPolicy.defaultPolicy();
 let policyPlayCount = 0;
+let dailyBriefing = null;
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -68,6 +70,30 @@ function getQueueState(limit = 5) {
   });
 }
 
+function readUserFile(relativePath) {
+  try {
+    return fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+async function ensureDailyBriefing(now = new Date()) {
+  if (!weatherText) {
+    weatherText = await weather.getWeatherText().catch(() => '');
+  }
+  dailyBriefing = await dailyStation.getOrCreateBriefing({
+    now,
+    weather: weatherText,
+    routinesText: readUserFile('user/routines.md'),
+    tasteSignals: stats.getTasteSignals(80),
+    recentPlays: stats.getRecentPlays(8),
+    stats,
+    ai
+  });
+  return dailyBriefing;
+}
+
 function broadcastQueue() {
   broadcast({ type: 'queue', queue: getQueueState() });
 }
@@ -81,6 +107,7 @@ wss.on('connection', (ws) => {
     weather: weatherText,
     next: playlist[0] || null,
     queue: getQueueState(),
+    dailyBriefing,
     djPolicy: activePolicy,
     scene: activeScene
   }));
@@ -272,6 +299,7 @@ async function activateTrack(track, systemPrompt, userRequested = false) {
     weather: weatherText,
     next: playlist[0] || null,
     queue: getQueueState(),
+    dailyBriefing,
     userRequested,
     djPolicy: activePolicy,
     scene: activeScene
@@ -511,6 +539,7 @@ async function nextTrack() {
     weather: weatherText,
     next: playlist[0] || null,
     queue: getQueueState(),
+    dailyBriefing,
     djPolicy: activePolicy,
     scene: activeScene
   });
@@ -662,9 +691,15 @@ app.get('/api/now', async (req, res) => {
     weather: weatherText,
     next: playlist[0] || null,
     queue: getQueueState(),
+    dailyBriefing,
     djPolicy: activePolicy,
     scene: activeScene
   });
+});
+
+app.get('/api/daily-briefing', async (req, res) => {
+  const briefing = await ensureDailyBriefing();
+  res.json({ briefing });
 });
 
 app.post('/api/next', async (req, res) => {
@@ -953,6 +988,7 @@ async function start() {
 
   await loadPlaylist();
   await nextTrack();
+  await ensureDailyBriefing();
 
   const actualPort = await listenWithFallback(PORT);
   console.log(`\n✅ Claudio FM 已启动！`);

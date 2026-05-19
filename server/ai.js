@@ -140,4 +140,54 @@ async function generateTasteMd({ playlistNames, artists, sampleSongs }) {
   }
 }
 
-module.exports = { generateAnnouncement, chat, generateTasteMd };
+function fallbackDailyBriefing(input = {}) {
+  const slotLabel = input.slot?.label || '现在';
+  const weather = input.weather ? `外面是${input.weather}，` : '';
+  const artist = input.tasteSignals?.topArtists?.[0]?.name || '';
+  const taste = artist ? `顺着你最近常听的 ${artist}，` : '';
+  return `${slotLabel}好，${weather}${taste}我先把电台调到适合这一刻的状态。`;
+}
+
+async function generateDailyBriefing(input = {}) {
+  const ai = getClient();
+  if (!ai) return fallbackDailyBriefing(input);
+
+  const topArtists = (input.tasteSignals?.topArtists || []).slice(0, 4).map(item => item.name).join('、') || '暂无';
+  const topCategories = (input.tasteSignals?.topCategories || []).slice(0, 4).map(item => item.name).join('、') || '暂无';
+  const recentSongs = (input.recentPlays || []).slice(0, 4).map(item => item.song_name || item.name).filter(Boolean).join('、') || '暂无';
+
+  try {
+    const response = await ai.chat.completions.create({
+      model: MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: `请为私人 AI 音乐电台生成一句当前时段开场白。
+
+时段：${input.slot?.label || '当前时段'}（${input.slot?.tone || '贴合当前状态'}）
+天气：${input.weather || '未知'}
+近期常听歌手：${topArtists}
+近期常听类型：${topCategories}
+最近播放：${recentSongs}
+用户作息：
+${input.routinesText || '暂无'}
+
+要求：
+- 中文，35-70 个字。
+- 像私人电台 DJ 对一个人说话，不要像公告。
+- 可以提到时间、天气、状态或听歌偏好，但不要堆信息。
+- 不要说“大家好”。`
+        }
+      ],
+      max_tokens: 140,
+      temperature: 0.8
+    });
+    const text = response.choices[0].message.content.trim();
+    return text || fallbackDailyBriefing(input);
+  } catch (e) {
+    console.warn('generateDailyBriefing error:', e.message);
+    return fallbackDailyBriefing(input);
+  }
+}
+
+module.exports = { generateAnnouncement, chat, generateTasteMd, generateDailyBriefing };

@@ -12,10 +12,11 @@ function load() {
     return {
       plays: Array.isArray(db.plays) ? db.plays : [],
       prefs: db.prefs || {},
-      feedback: Array.isArray(db.feedback) ? db.feedback : []
+      feedback: Array.isArray(db.feedback) ? db.feedback : [],
+      dailyBriefings: Array.isArray(db.dailyBriefings) ? db.dailyBriefings : []
     };
   } catch {
-    return { plays: [], prefs: {}, feedback: [] };
+    return { plays: [], prefs: {}, feedback: [], dailyBriefings: [] };
   }
 }
 
@@ -131,6 +132,29 @@ function isTrackBlocked(track) {
     || signals.blockedCategories.has(category);
 }
 
+function saveDailyBriefing(entry) {
+  const db = load();
+  const next = {
+    key: entry.key,
+    date: entry.date || '',
+    slot: entry.slot || '',
+    slotLabel: entry.slotLabel || '',
+    text: entry.text || '',
+    weather: entry.weather || '',
+    created_at: entry.created_at || Math.floor(Date.now() / 1000)
+  };
+  db.dailyBriefings = db.dailyBriefings.filter(item => item.key !== next.key);
+  db.dailyBriefings.unshift(next);
+  if (db.dailyBriefings.length > 40) db.dailyBriefings = db.dailyBriefings.slice(0, 40);
+  save(db);
+  return next;
+}
+
+function getDailyBriefing(key) {
+  if (!key) return null;
+  return load().dailyBriefings.find(item => item.key === key) || null;
+}
+
 function savePreference(key, value) {
   const db = load();
   db.prefs[key] = value;
@@ -150,5 +174,7 @@ module.exports = {
   getPreference,
   saveFeedback,
   getFeedbackSignals,
-  isTrackBlocked
+  isTrackBlocked,
+  saveDailyBriefing,
+  getDailyBriefing
 };
