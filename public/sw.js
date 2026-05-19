@@ -1,5 +1,5 @@
-const CACHE = 'claudio-v4';
-// JS/CSS always fetched from network; only images/manifest cached
+const CACHE = 'claudio-v5';
+// HTML/JS/CSS always fetched from network; only manifest/icons cached
 const IMMUTABLE = ['/manifest.json'];
 
 self.addEventListener('install', (e) => {
@@ -19,10 +19,13 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // Never intercept API, streams, or JS/CSS — always network for these
+  // Never intercept app shell, API, streams, JS, or CSS — always network for these
   if (
+    e.request.mode === 'navigate' ||
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/stream') ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.html') ||
     url.pathname.endsWith('.js') ||
     url.pathname.endsWith('.css')
   ) {

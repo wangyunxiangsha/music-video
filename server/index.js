@@ -31,9 +31,14 @@ const PORT_RETRY_LIMIT = Number(process.env.PORT_RETRY_LIMIT || 10);
 
 app.use(cors());
 app.use(express.json());
-// Prevent browsers from caching JS/CSS so updates take effect immediately
+// Prevent browsers from caching the app shell and JS/CSS so updates take effect immediately
 app.use((req, res, next) => {
-  if (req.path.endsWith('.js') || req.path.endsWith('.css')) {
+  if (
+    req.path === '/'
+    || req.path.endsWith('.html')
+    || req.path.endsWith('.js')
+    || req.path.endsWith('.css')
+  ) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   }
   next();
@@ -756,29 +761,41 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
 
     const isQQ = String(id).startsWith('qq:');
 
-    // QQ Music CDN does server-side bot detection; redirect so the browser
-    // fetches directly — the signed vkey URL is self-authenticating.
-    if (isQQ) {
-      return res.redirect(302, url);
+    const streamHeaders = isQQ
+      ? {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer':    'https://y.qq.com/',
+          'Origin':     'https://y.qq.com',
+          'Cookie':     process.env.QQ_MUSIC_COOKIE || ''
+        }
+      : {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer':    'https://music.163.com/',
+          'Cookie':     process.env.NETEASE_COOKIE || ''
+        };
+    if (req.headers.range) {
+      streamHeaders.Range = req.headers.range;
     }
 
-    // Netease: proxy through server to handle CORS and cookie auth
     const response = await axios({
       url,
       method: 'GET',
       responseType: 'stream',
       timeout: 15000,
       maxRedirects: 5,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer':    'https://music.163.com/',
-        'Cookie':     process.env.NETEASE_COOKIE || ''
-      }
+      validateStatus: (status) => status >= 200 && status < 300,
+      headers: streamHeaders
     });
 
+    if (response.status === 206) {
+      res.status(206);
+    }
     res.setHeader('Content-Type', response.headers['content-type'] || 'audio/mpeg');
     if (response.headers['content-length']) {
       res.setHeader('Content-Length', response.headers['content-length']);
+    }
+    if (response.headers['content-range']) {
+      res.setHeader('Content-Range', response.headers['content-range']);
     }
     res.setHeader('Accept-Ranges', 'bytes');
     response.data.pipe(res);
