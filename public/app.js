@@ -380,10 +380,14 @@
   }
 
   // ─── Playback ──────────────────────────────────────────────────────────────
+  const PLAYBACK_STALL_MS = 20000;
+  let lastProgressAt = Date.now();
+  let lastProgressTime = 0;
+
   function setPlaying(v) {
     S.playing = v;
     btnPlay.textContent = v ? 'Ⅱ' : '▶';
-    if (stationStatus) stationStatus.textContent = v ? 'Speaking...' : 'Standby';
+    if (stationStatus) stationStatus.textContent = v ? 'Playing...' : 'Standby';
     app.classList.toggle('playing', v);
     vinyl.classList.toggle('playing', v);
   }
@@ -403,8 +407,18 @@
   if (btnDislike) btnDislike.onclick = () => sendFeedbackCommand('\u5c11\u653e\u8fd9\u9996');
 
   audio.onended  = () => requestNextTrack();
-  audio.onplay   = () => setPlaying(true);
+  audio.onplay   = () => {
+    lastProgressAt = Date.now();
+    lastProgressTime = audio.currentTime || 0;
+    setPlaying(true);
+  };
   audio.onpause  = () => setPlaying(false);
+  audio.onwaiting = audio.onstalled = () => {
+    if (stationStatus && S.playing) stationStatus.textContent = 'Buffering...';
+  };
+  audio.oncanplay = () => {
+    if (stationStatus && S.playing) stationStatus.textContent = 'Playing...';
+  };
 
   // Skip Netease 30-second trial clips; QQ songs with VIP always play to end
   audio.onloadedmetadata = () => {
@@ -438,12 +452,31 @@
   // ─── Progress bar ──────────────────────────────────────────────────────────
   audio.ontimeupdate = () => {
     if (!audio.duration) return;
+    lastProgressAt = Date.now();
+    lastProgressTime = audio.currentTime || 0;
     const pct = (audio.currentTime / audio.duration) * 100;
     fill.style.width = `${pct}%`;
     tCur.textContent = fmtTime(audio.currentTime);
     tEnd.textContent = fmtTime(audio.duration);
     if (S.lyricOpen) syncLyric();
   };
+
+  setInterval(() => {
+    if (!S.playing || audio.paused || !S.track || !audio.duration) return;
+    const remaining = audio.duration - audio.currentTime;
+    if (remaining <= 3) return;
+    const current = audio.currentTime || 0;
+    const hasProgress = Math.abs(current - lastProgressTime) > 0.25;
+    if (hasProgress) {
+      lastProgressAt = Date.now();
+      lastProgressTime = current;
+      return;
+    }
+    if (Date.now() - lastProgressAt > PLAYBACK_STALL_MS) {
+      console.warn('Playback stalled — requesting next track');
+      requestNextTrack(`《${S.track?.name || '该歌曲'}》播放卡住了，马上换下一首。`);
+    }
+  }, 5000);
 
   bar.onclick = (e) => {
     const { left, width } = bar.getBoundingClientRect();
