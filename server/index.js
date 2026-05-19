@@ -21,6 +21,7 @@ const scenes    = require('./scenes');
 const djPolicy  = require('./dj-policy');
 const queue     = require('./queue');
 const dailyStation = require('./daily-station');
+const recommendationMixer = require('./recommendation-mixer');
 
 const app = express();
 const server = http.createServer(app);
@@ -338,7 +339,7 @@ function setActivePolicy(policy, scene = activeScene) {
 async function switchToCategory(category, systemPrompt) {
   const pool = categories.buildCategoryPool(category);
   if (!pool.length) return null;
-  playlist = pool;
+  playlist = await buildSmartQueue(pool, { scene: { id: category.id, name: category.name }, limit: 80 });
   const track = playlist.shift();
   if (!track) return null;
   broadcastQueue();
@@ -347,7 +348,7 @@ async function switchToCategory(category, systemPrompt) {
 
 async function switchToScene(scene, systemPrompt) {
   setActivePolicy(djPolicy.policyFromScene(scene), { id: scene.id, name: scene.name });
-  const pool = boostPlaylistByTaste(scenes.buildScenePool(scene));
+  const pool = await buildSmartQueue(scenes.buildScenePool(scene), { scene, limit: 80 });
   if (!pool.length) return null;
   playlist = pool;
   const track = playlist.shift();
@@ -357,23 +358,23 @@ async function switchToScene(scene, systemPrompt) {
   return activateTrack(track, scenePrompt, true);
 }
 
-function buildDefaultQueuePool() {
+async function buildDefaultQueuePool() {
   try {
     const pool = importer.buildPlaylistPool();
-    if (pool.length > 0) return boostPlaylistByTaste(pool);
+    if (pool.length > 0) return buildSmartQueue(pool, { limit: 120 });
   } catch (e) {
     console.warn('队列重建读取本地歌单失败:', e.message);
   }
   return [...MOCK_PLAYLIST];
 }
 
-function rebuildUpcomingQueue() {
+async function rebuildUpcomingQueue() {
   let pool = [];
   if (activeScene?.id) {
     const scene = scenes.findScene(activeScene.id);
-    if (scene) pool = boostPlaylistByTaste(scenes.buildScenePool(scene));
+    if (scene) pool = await buildSmartQueue(scenes.buildScenePool(scene), { scene, limit: 80 });
   }
-  if (!pool.length) pool = buildDefaultQueuePool();
+  if (!pool.length) pool = await buildDefaultQueuePool();
   playlist = queue.rebuildQueue(pool);
   broadcastQueue();
   return getQueueState();
@@ -438,6 +439,26 @@ function boostPlaylistByTaste(pool) {
   });
 }
 
+async function buildSmartQueue(localPool, { scene = activeScene, limit = 80 } = {}) {
+  const externalPool = await recommendationMixer.buildExternalRecommendationPool({
+    music,
+    qqmusic,
+    tasteSignals: stats.getTasteSignals(120),
+    scene,
+    slot: dailyBriefing || dailyStation.getTimeSlot(new Date()),
+    limit: Math.max(12, Math.ceil(limit * 0.35)),
+    isBlocked: stats.isTrackBlocked
+  });
+  const mixed = recommendationMixer.mixRecommendationQueue({
+    localPool: boostPlaylistByTaste(localPool),
+    externalPool,
+    localRatio: 0.75,
+    limit,
+    isBlocked: stats.isTrackBlocked
+  });
+  return mixed.length ? mixed : boostPlaylistByTaste(localPool);
+}
+
 async function loadUserPlaylistsIntoPool() {
   const uid = await music.getUserAccount();
   if (!uid) return [];
@@ -483,8 +504,8 @@ async function loadPlaylist() {
   try {
     const pool = importer.buildPlaylistPool();
     if (pool.length > 0) {
-      playlist = boostPlaylistByTaste(pool);
-      console.log(`✓ 从本地歌单数据加载 ${playlist.length} 首`);
+      playlist = await buildSmartQueue(pool, { limit: 120 });
+      console.log(`✓ 加载智能队列 ${playlist.length} 首（75% 本地歌单 / 25% 外部推荐）`);
       return;
     }
   } catch (e) {
@@ -495,7 +516,7 @@ async function loadPlaylist() {
   try {
     const userTracks = await loadUserPlaylistsIntoPool();
     if (userTracks.length > 0) {
-      playlist = userTracks;
+      playlist = await buildSmartQueue(userTracks, { limit: 120 });
       console.log(`✓ 用户歌单加载完成，共 ${playlist.length} 首`);
       return;
     }
@@ -519,7 +540,9 @@ async function loadPlaylist() {
 }
 
 async function nextTrack() {
-  if (playlist.length < 5) {
+  if (playlist.length === 0) {
+    await loadPlaylist();
+  } else if (playlist.length < 5) {
     loadPlaylist().catch(console.error);
   }
   if (playlist.length === 0) {
@@ -723,9 +746,13 @@ app.post('/api/queue/skip-next', (req, res) => {
   res.json({ ok: true, removed: result.removed ? queue.summarizeQueue({ playlist: [result.removed] }).next[0] : null, queue: getQueueState() });
 });
 
-app.post('/api/queue/rebuild', (req, res) => {
-  const nextQueue = rebuildUpcomingQueue();
-  res.json({ ok: true, queue: nextQueue });
+app.post('/api/queue/rebuild', async (req, res) => {
+  try {
+    const nextQueue = await rebuildUpcomingQueue();
+    res.json({ ok: true, queue: nextQueue });
+  } catch (error) {
+    res.status(500).json({ ok: false, reason: error.message, queue: getQueueState() });
+  }
 });
 
 app.post('/api/queue/insert', async (req, res) => {
