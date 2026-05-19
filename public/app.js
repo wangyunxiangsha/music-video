@@ -11,6 +11,7 @@
     historyOpen:   false,
     lyricLines:    [],
     userRequested: false,
+    queue:         null,
   };
 
   // ─── DOM ───────────────────────────────────────────────────────────────────
@@ -61,6 +62,11 @@
   const historyArtists = $('history-artists');
   const historyCategories = $('history-categories');
   const historyList = $('history-list');
+  const queueCount = $('queue-count');
+  const queueList = $('queue-list');
+  const queueSkip = $('queue-skip');
+  const queueRebuild = $('queue-rebuild');
+  const queueInsert = $('queue-insert');
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
   function fmtTime(s) {
@@ -179,6 +185,45 @@
     renderHistoryList(data?.recent);
   }
 
+  function renderQueue(data) {
+    S.queue = data || S.queue;
+    const q = S.queue || {};
+    const next = Array.isArray(q.next) ? q.next : [];
+    if (queueCount) queueCount.textContent = `${q.count || 0} TRACKS`;
+    if (!queueList) return;
+    if (!next.length) {
+      queueList.innerHTML = '<span class="queue-empty">暂无待播歌曲</span>';
+      return;
+    }
+    queueList.innerHTML = next.map((item, index) => `
+      <div class="queue-item">
+        <span>${String(index + 1).padStart(2, '0')}</span>
+        <strong title="${escapeHtml(item.name)}">${escapeHtml(item.name || '未知歌曲')}</strong>
+        <em title="${escapeHtml(item.artist)}">${escapeHtml(item.artist || '未知歌手')}</em>
+      </div>
+    `).join('');
+  }
+
+  async function refreshQueue() {
+    try {
+      const res = await fetch('/api/queue?limit=5');
+      const data = await res.json();
+      renderQueue(data);
+    } catch {
+      if (queueList) queueList.innerHTML = '<span class="queue-empty">队列暂时无法同步</span>';
+    }
+  }
+
+  async function postQueueAction(url, body) {
+    const options = { method: 'POST' };
+    if (body) {
+      options.headers = { 'Content-Type': 'application/json' };
+      options.body = JSON.stringify(body);
+    }
+    const res = await fetch(url, options);
+    return res.json();
+  }
+
   // ─── WebSocket ─────────────────────────────────────────────────────────────
   let ws, wsDelay = 1000;
 
@@ -201,8 +246,11 @@
       if (d.track) loadTrack(d.track, d.userRequested);
       if ('djMessage' in d) typewriter(d.djMessage || '');
       if ('weather' in d) updateWeather(d.weather);
+      if ('queue' in d) renderQueue(d.queue);
     } else if (d.type === 'chat' && d.reply) {
       addBubble('dj', d.reply);
+    } else if (d.type === 'queue' && d.queue) {
+      renderQueue(d.queue);
     }
   }
 
@@ -499,6 +547,53 @@
     };
   }
 
+  if (queueSkip) {
+    queueSkip.onclick = async () => {
+      try {
+        const data = await postQueueAction('/api/queue/skip-next');
+        renderQueue(data.queue);
+        if (data.removed) addBubble('dj', `已从队列移除下一首《${data.removed.name}》。`);
+      } catch {
+        addBubble('dj', '队列暂时没改成，稍后再试。');
+      }
+    };
+  }
+
+  if (queueRebuild) {
+    queueRebuild.onclick = async () => {
+      try {
+        const data = await postQueueAction('/api/queue/rebuild');
+        renderQueue(data.queue);
+        addBubble('dj', '队列已经重新生成。');
+      } catch {
+        addBubble('dj', '重新生成队列失败，稍后再试。');
+      }
+    };
+  }
+
+  if (queueInsert) {
+    queueInsert.onclick = async () => {
+      const message = quickIn?.value.trim();
+      if (!message) {
+        openChat(true);
+        addBubble('dj', '先在输入框写一首歌名，再点 INSERT。');
+        return;
+      }
+      try {
+        const data = await postQueueAction('/api/queue/insert', { message });
+        if (data.queue) renderQueue(data.queue);
+        if (data.ok && data.inserted) {
+          quickIn.value = '';
+          addBubble('dj', `《${data.inserted.name}》已插到下一首。`);
+        } else {
+          addBubble('dj', data.reason || '这首歌暂时没插进去。');
+        }
+      } catch {
+        addBubble('dj', '插队失败，稍后再试。');
+      }
+    };
+  }
+
   function startVoiceInput() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -720,6 +815,8 @@
       if (data.track)     loadTrack(data.track);
       if (data.djMessage) typewriter(data.djMessage);
       if ('weather' in data) updateWeather(data.weather);
+      if ('queue' in data) renderQueue(data.queue);
+      else refreshQueue();
     } catch {
       songTitle.textContent = '正在连接…';
     }

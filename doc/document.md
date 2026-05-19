@@ -97,3 +97,22 @@
 | `doc/standard.md` | 补充播报策略应统一由 `server/dj-policy.js` 控制的规范 |
 | `doc/summary.md` | 补充 DJ 播报策略阶段摘要和剩余风险 |
 | `doc/talk.md` | 记录实现范围、验证命令和剩余风险 |
+
+---
+
+## 2026-05-19：队列预览和轻量编辑
+
+### 更新原因
+
+根据下一阶段路线，继续实现“队列预览和轻量编辑”，让 Claudio FM 不只是自动切歌，也能让用户看到并轻量控制接下来要播的内容。
+
+### 已更新文档
+
+| 文档 | 更新内容 |
+|------|----------|
+| `docs/superpowers/plans/2026-05-19-queue-preview-editing.md` | 新增本阶段实施计划 |
+| `readme.md` | 新增队列预览、DROP/RESHUFFLE/INSERT 控件说明、插队指令和队列 API |
+| `doc/plan.md` | 将队列预览和轻量编辑标记为已完成 |
+| `doc/standard.md` | 补充前端队列预览必须消费 `/api/queue`、队列编辑必须走队列 API 的规范 |
+| `doc/summary.md` | 补充队列阶段摘要和剩余风险 |
+| `doc/talk.md` | 记录实现范围、验证命令和剩余风险 |

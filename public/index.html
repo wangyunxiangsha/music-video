@@ -116,9 +116,19 @@
       </div>
     </section>
 
-    <section class="queue-strip">
-      <span>QUEUE</span>
-      <span>0 TRACKS</span>
+    <section class="queue-strip" aria-label="播放队列">
+      <div class="queue-head">
+        <span>QUEUE</span>
+        <strong id="queue-count">0 TRACKS</strong>
+      </div>
+      <div class="queue-actions">
+        <button id="queue-skip" type="button" title="删除下一首">DROP</button>
+        <button id="queue-rebuild" type="button" title="重新生成队列">RESHUFFLE</button>
+        <button id="queue-insert" type="button" title="把输入框歌曲插到下一首">INSERT</button>
+      </div>
+      <div class="queue-list" id="queue-list">
+        <span class="queue-empty">队列同步中</span>
+      </div>
     </section>
 
     <div class="dj-channel">

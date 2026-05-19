@@ -48,6 +48,7 @@ music-video/
 - MIC 按钮使用浏览器 `SpeechRecognition` / `webkitSpeechRecognition`，识别结果必须复用底部 DJ 输入和 `/api/chat`
 - 歌单导入完成后应在 UI 中展示导入摘要和日志，不只显示一句完成提示
 - 播放历史可视化统一消费 `/api/history` 摘要，不在前端直接解析 `data/stats.json`
+- 队列预览统一消费 `/api/queue` 摘要，不在前端复刻后端队列逻辑；删除下一首、重新生成队列、插队点歌必须通过对应队列 API 完成
 - 顶部 Claudio 头像与 DJ 消息头像使用固定 `public/avatar.jpg`，专辑封面只用于唱片/歌曲展示，不覆盖 DJ 身份头像
 
 ## 设计规范

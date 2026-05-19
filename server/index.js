@@ -19,6 +19,7 @@ const categories = require('./categories');
 const feedback  = require('./feedback');
 const scenes    = require('./scenes');
 const djPolicy  = require('./dj-policy');
+const queue     = require('./queue');
 
 const app = express();
 const server = http.createServer(app);
@@ -57,6 +58,20 @@ function broadcast(data) {
   }
 }
 
+function getQueueState(limit = 5) {
+  return queue.summarizeQueue({
+    currentTrack,
+    playlist,
+    limit,
+    scene: activeScene,
+    djPolicy: activePolicy
+  });
+}
+
+function broadcastQueue() {
+  broadcast({ type: 'queue', queue: getQueueState() });
+}
+
 wss.on('connection', (ws) => {
   clients.add(ws);
   ws.send(JSON.stringify({
@@ -65,6 +80,7 @@ wss.on('connection', (ws) => {
     djMessage,
     weather: weatherText,
     next: playlist[0] || null,
+    queue: getQueueState(),
     djPolicy: activePolicy,
     scene: activeScene
   }));
@@ -89,6 +105,11 @@ const REQUEST_PATTERNS = [
   /^换(?:一首|成)?[《<「【]?(.+?)[》>」】]?\s*$/,
   /^帮我放[《<「【]?(.+?)[》>」】]?\s*$/,
 ];
+const INSERT_PATTERNS = [
+  /^插队(?:播放|点歌)?[《<「【]?(.+?)[》>」】]?\s*$/,
+  /^把[《<「【]?(.+?)[》>」】]?\s*插(?:到|为)?下一首\s*$/,
+  /^下一首(?:播放|放|听)[《<「【]?(.+?)[》>」】]?\s*$/
+];
 const NEXT_PATTERNS = [/^(下一首|换一首|切歌|跳过)$/];
 const CATEGORY_PATTERNS = [
   /^播放(.+?)(?:类型|分类|歌单)?$/,
@@ -106,6 +127,14 @@ const SCENE_PATTERNS = [
 
 function extractSongName(message) {
   for (const p of REQUEST_PATTERNS) {
+    const m = message.trim().match(p);
+    if (m && m[1] && m[1].trim().length >= 1) return m[1].trim();
+  }
+  return null;
+}
+
+function extractInsertSongName(message) {
+  for (const p of INSERT_PATTERNS) {
     const m = message.trim().match(p);
     if (m && m[1] && m[1].trim().length >= 1) return m[1].trim();
   }
@@ -185,6 +214,11 @@ async function resolveSongUrl(track) {
 }
 
 async function switchToSong(songName, systemPrompt) {
+  const track = await findRequestedSong(songName);
+  return track ? activateTrack(track, systemPrompt, true) : null;
+}
+
+async function findRequestedSong(songName) {
   // Parse "周杰伦的稻香" → search with full artist+song query for precision
   const parsed = parseArtistSong(songName);
   const query  = parsed ? `${parsed.artist} ${parsed.song}` : songName;
@@ -200,7 +234,7 @@ async function switchToSong(songName, systemPrompt) {
 
   for (const candidate of neteaseOrdered) {
     const url = await music.getSongUrl(candidate.id);
-    if (url) return activateTrack(candidate, systemPrompt, true);
+    if (url) return candidate;
   }
 
   // ── 2. Fall back to QQ Music (needs SVIP for most songs) ────────────────────
@@ -217,7 +251,7 @@ async function switchToSong(songName, systemPrompt) {
       : qqRanked.slice(0, 1);
     for (const candidate of qqFiltered.slice(0, 3)) {
       const url = await qqmusic.getSongUrl(candidate._qqmid);
-      if (url) return activateTrack(candidate, systemPrompt, true);
+      if (url) return candidate;
     }
   }
 
@@ -237,6 +271,7 @@ async function activateTrack(track, systemPrompt, userRequested = false) {
     djMessage,
     weather: weatherText,
     next: playlist[0] || null,
+    queue: getQueueState(),
     userRequested,
     djPolicy: activePolicy,
     scene: activeScene
@@ -263,7 +298,7 @@ function setActivePolicy(policy, scene = activeScene) {
   activePolicy = policy || djPolicy.defaultPolicy();
   activeScene = scene;
   policyPlayCount = 0;
-  broadcast({ type: 'policy', djPolicy: activePolicy, scene: activeScene });
+  broadcast({ type: 'policy', djPolicy: activePolicy, scene: activeScene, queue: getQueueState() });
   return activePolicy;
 }
 
@@ -273,6 +308,7 @@ async function switchToCategory(category, systemPrompt) {
   playlist = pool;
   const track = playlist.shift();
   if (!track) return null;
+  broadcastQueue();
   return activateTrack(track, systemPrompt, true);
 }
 
@@ -284,7 +320,38 @@ async function switchToScene(scene, systemPrompt) {
   const track = playlist.shift();
   if (!track) return null;
   const scenePrompt = await buildRuntimeContext();
+  broadcastQueue();
   return activateTrack(track, scenePrompt, true);
+}
+
+function buildDefaultQueuePool() {
+  try {
+    const pool = importer.buildPlaylistPool();
+    if (pool.length > 0) return boostPlaylistByTaste(pool);
+  } catch (e) {
+    console.warn('队列重建读取本地歌单失败:', e.message);
+  }
+  return [...MOCK_PLAYLIST];
+}
+
+function rebuildUpcomingQueue() {
+  let pool = [];
+  if (activeScene?.id) {
+    const scene = scenes.findScene(activeScene.id);
+    if (scene) pool = boostPlaylistByTaste(scenes.buildScenePool(scene));
+  }
+  if (!pool.length) pool = buildDefaultQueuePool();
+  playlist = queue.rebuildQueue(pool);
+  broadcastQueue();
+  return getQueueState();
+}
+
+async function insertRequestedTrack(songName) {
+  const track = await findRequestedSong(songName);
+  if (!track) return null;
+  playlist = queue.insertNext(playlist, track);
+  broadcastQueue();
+  return track;
 }
 
 // ─── Playlist management ──────────────────────────────────────────────────────
@@ -443,6 +510,7 @@ async function nextTrack() {
     djMessage,
     weather: weatherText,
     next: playlist[0] || null,
+    queue: getQueueState(),
     djPolicy: activePolicy,
     scene: activeScene
   });
@@ -593,6 +661,7 @@ app.get('/api/now', async (req, res) => {
     djMessage,
     weather: weatherText,
     next: playlist[0] || null,
+    queue: getQueueState(),
     djPolicy: activePolicy,
     scene: activeScene
   });
@@ -600,7 +669,32 @@ app.get('/api/now', async (req, res) => {
 
 app.post('/api/next', async (req, res) => {
   await nextTrack();
-  res.json({ track: currentTrack, djMessage });
+  res.json({ track: currentTrack, djMessage, queue: getQueueState() });
+});
+
+app.get('/api/queue', (req, res) => {
+  res.json(getQueueState(Math.max(1, Math.min(20, Number(req.query.limit) || 5))));
+});
+
+app.post('/api/queue/skip-next', (req, res) => {
+  const result = queue.removeNext(playlist);
+  playlist = result.playlist;
+  broadcastQueue();
+  res.json({ ok: true, removed: result.removed ? queue.summarizeQueue({ playlist: [result.removed] }).next[0] : null, queue: getQueueState() });
+});
+
+app.post('/api/queue/rebuild', (req, res) => {
+  const nextQueue = rebuildUpcomingQueue();
+  res.json({ ok: true, queue: nextQueue });
+});
+
+app.post('/api/queue/insert', async (req, res) => {
+  const { message } = req.body || {};
+  const songName = typeof message === 'string' ? (extractSongName(message) || message.trim()) : '';
+  if (!songName) return res.status(400).json({ ok: false, reason: '请输入要插队的歌曲' });
+  const track = await insertRequestedTrack(songName);
+  if (!track) return res.json({ ok: false, reason: `没找到《${songName}》，可能版权限制或拼写有误。`, queue: getQueueState() });
+  res.json({ ok: true, inserted: queue.summarizeQueue({ playlist: [track] }).next[0], queue: getQueueState() });
 });
 
 app.get('/api/music/url/:id', async (req, res) => {
@@ -720,6 +814,20 @@ app.post('/api/chat', async (req, res) => {
     chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
     if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
     return res.json({ reply, switched: !!currentTrack });
+  }
+
+  const insertSongName = extractInsertSongName(message);
+  if (insertSongName) {
+    const track = await insertRequestedTrack(insertSongName);
+    const artistName = track
+      ? (track.artists?.[0]?.name || track.ar?.[0]?.name || '')
+      : '';
+    const reply = track
+      ? `好，《${track.name}》${artistName ? `— ${artistName}` : ''} 已插到下一首。`
+      : `没找到《${insertSongName}》，可能版权限制或拼写有误。`;
+    chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    return res.json({ reply, inserted: !!track, queue: getQueueState() });
   }
 
   const scene = extractScene(message);

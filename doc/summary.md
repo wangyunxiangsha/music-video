@@ -115,9 +115,12 @@
 
 DJ 播报策略控制已接入：`server/dj-policy.js` 管理 normal、minimal、short、warm、silent 策略；场景会自动套用对应播报方式，用户也可以用“少说话”“多介绍一点”“只播歌”“恢复播报”调整。当前策略会注入 DJ prompt，并通过 `/api/dj-policy`、`/api/now` 和 WebSocket 状态暴露给前端。
 
+2026-05-19 更新后，队列预览和轻量编辑已接入：播放器 `QUEUE` 区域会展示接下来 5 首歌曲，并支持 `DROP` 删除下一首、`RESHUFFLE` 按当前场景或本地偏好重新生成队列、`INSERT` 将输入框中的歌曲插到下一首。后端新增 `server/queue.js` 作为纯队列助手模块，并通过 `/api/queue`、`/api/queue/skip-next`、`/api/queue/rebuild`、`/api/queue/insert` 暴露能力；WebSocket 状态也会同步队列快照。
+
 ### 剩余风险
 
 - QQ 音乐仍受账号权限影响，非 VIP Cookie 对部分歌曲只能拿到不可播放 URL。
 - MIC 语音输入依赖浏览器支持；Chrome/Edge 通常可用，部分浏览器会降级为文字输入提示。
 - 天气上下文优先使用高德天气，需要用户自行配置 `AMAP_WEATHER_KEY`；当前顶部时间下方会显示北京天气，未配置时会自动跳过。
 - 播报策略影响的是播报频率和 prompt 约束；最终文本仍受模型输出、TTS 可用性和用户是否开启 VOICE 影响。
+- 插队点歌会先解析到可播放歌曲再进入队列；如果平台版权不可用或 QQ Cookie 权限不足，仍可能插队失败并给出提示。
