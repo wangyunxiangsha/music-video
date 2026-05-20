@@ -209,6 +209,14 @@ function extractCategoryName(message) {
   return categories.findCategory(text);
 }
 
+function extractStyleCategory(message) {
+  const text = message.trim();
+  if (!/(想听|听点|放点|来点|安排|适合|上午|早上|中午|下午|晚上|夜里|阴天|雨天|下雨)/.test(text)) {
+    return null;
+  }
+  return categories.findCategory(text);
+}
+
 function extractScene(message) {
   const text = message.trim();
   for (const p of SCENE_PATTERNS) {
@@ -1010,6 +1018,17 @@ app.post('/api/chat', async (req, res) => {
     chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
     if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
     return res.json({ reply, inserted: !!track, queue: getQueueState() });
+  }
+
+  const styleCategory = extractStyleCategory(message);
+  if (styleCategory) {
+    const track = await switchToCategory(styleCategory, systemPrompt);
+    const reply = track
+      ? `好，我给你安排「${styleCategory.name}」风格，先听《${track.name}》。`
+      : `「${styleCategory.name}」里暂时没有可播放歌曲。`;
+    chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    return res.json({ reply, switched: !!track, category: styleCategory.name, styleIntent: true });
   }
 
   const scene = extractScene(message);
