@@ -69,6 +69,11 @@ function isCleanExternalCandidate(track) {
   return !BAD_EXTERNAL_VERSION_RE.test(haystack);
 }
 
+function preferCleanVersions(items = []) {
+  const clean = (items || []).filter(isCleanExternalCandidate);
+  return clean.length ? clean : (items || []);
+}
+
 function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio = 0.75, limit = 80, isBlocked = () => false } = {}) {
   const seen = new Set();
   const locals = uniqueTracks(localPool, isBlocked, seen);
@@ -161,5 +166,6 @@ module.exports = {
   resolveExternalRecommendationRatio,
   ratioForExplorationMode,
   parseExplorationCommand,
-  isCleanExternalCandidate
+  isCleanExternalCandidate,
+  preferCleanVersions
 };

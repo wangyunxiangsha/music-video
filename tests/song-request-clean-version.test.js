@@ -1,0 +1,10 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const index = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8');
+
+assert.match(index, /preferCleanVersions\(neteaseResults\)/);
+assert.match(index, /preferCleanVersions\(qqResults\)/);
+
+console.log('song request clean version tests passed');

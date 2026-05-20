@@ -32,6 +32,17 @@ async function run() {
   );
   assert.strictEqual(mixed.filter(item => item.recommendationSource === 'external').length, 2);
 
+  const preferred = mixer.preferCleanVersions([
+    track('live', '寄明月 (Live)', 'SING女团', { album: { name: '炙热的我们 第8期' } }),
+    track('clean', '寄明月', 'SING女团', { album: { name: '寄明月' } })
+  ]);
+  assert.deepStrictEqual(preferred.map(item => item.id), ['clean']);
+
+  const noCleanFallback = mixer.preferCleanVersions([
+    track('live-only', '空白格 (Live)', '蔡健雅', { album: { name: '演唱会' } })
+  ]);
+  assert.deepStrictEqual(noCleanFallback.map(item => item.id), ['live-only']);
+
   const localOnly = mixer.mixRecommendationQueue({ localPool, externalPool, localRatio: 1, limit: 6 });
   assert.deepStrictEqual(localOnly.map(item => item.id), ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']);
 

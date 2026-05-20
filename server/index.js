@@ -305,7 +305,8 @@ async function findRequestedSong(songName) {
 
   // ── 1. Netease first ────────────────────────────────────────────────────────
   const neteaseResults = dedupeSongs(await music.searchSongs(query, 10));
-  const neteaseRanked  = rankByArtist(neteaseResults, artist);
+  const neteaseClean   = recommendationMixer.preferCleanVersions(neteaseResults);
+  const neteaseRanked  = rankByArtist(neteaseClean, artist);
   const neteaseOrdered = [
     ...neteaseRanked.filter(isPlayable),
     ...neteaseRanked.filter((s) => !isPlayable(s))
@@ -320,7 +321,8 @@ async function findRequestedSong(songName) {
   if (qqmusic.isEnabled()) {
     console.log(`网易云未找到，尝试 QQ 音乐: ${query}`);
     const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
-    const qqRanked   = rankByArtist(qqResults, artist);
+    const qqClean    = recommendationMixer.preferCleanVersions(qqResults);
+    const qqRanked   = rankByArtist(qqClean, artist);
     const qqFiltered = artist
       ? qqRanked.filter((s) => {
           const hint  = artist.toLowerCase();
