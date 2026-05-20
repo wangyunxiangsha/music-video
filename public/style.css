@@ -1053,33 +1053,6 @@ footer button.active {
   box-shadow: 0 0 20px rgba(49,242,162,.24);
 }
 
-.history-fab {
-  position: fixed;
-  right: max(12px, calc((100vw - 430px) / 2 + 12px));
-  bottom: max(14px, env(safe-area-inset-bottom));
-  z-index: 70;
-  min-width: 54px;
-  height: 36px;
-  padding: 0 13px;
-  border: 1px solid rgba(180,190,255,.18);
-  border-radius: 999px;
-  background: rgba(5, 7, 14, .88);
-  color: var(--green);
-  box-shadow: 0 16px 42px rgba(0,0,0,.5), 0 0 18px rgba(49,242,162,.12);
-  backdrop-filter: blur(18px);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-
-.history-fab:hover,
-.history-fab.active {
-  color: #06110d;
-  background: var(--green);
-}
-
 .lyric-overlay {
   position: fixed;
   inset: 0;

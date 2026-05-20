@@ -292,15 +292,15 @@
 
 ---
 
-## 2026-05-20：Chrome 历史入口消失
+## 2026-05-20：Chrome 队列预览消失
 
 ### 更新原因
 
-用户反馈播放历史入口在 Chrome 中不可见，但 Firefox 正常。排查确认历史功能未丢失，问题来自底部 footer 被不同浏览器视口和字体渲染差异挤出可视区域。最终采用固定 `HIST` 快捷入口，而不是固定整条 footer，避免遮挡 DJ 区和输入框。
+用户反馈 Chrome 中 `QUEUE` 队列预览不见了，只剩标题和 `SHOW`，而 Firefox 正常显示。排查确认原因是 Chrome 本地残留了 `localStorage.claudio.queueCollapsed=1`；强制刷新不会清除 localStorage。已撤掉误加的固定 `HIST` 快捷入口，改为启动时清除旧队列折叠 key，并让队列刷新后默认展开。
 
 ### 已更新文档
 
 | 文档 | 更新内容 |
 |------|----------|
-| `doc/talk.md` | 记录 Chrome 历史入口消失的根因、固定 HIST 快捷入口修复和验证命令 |
+| `doc/talk.md` | 记录 Chrome 队列预览消失的根因、取消队列折叠持久化和验证命令 |
 | `doc/document.md` | 记录本次文档更新 |

@@ -16,8 +16,9 @@ assert.match(css, /\.queue-strip\.collapsed\s+\.queue-list/);
 assert.match(css, /\.queue-toggle/);
 
 assert.match(js, /queueCollapsed/);
-assert.match(js, /localStorage\.getItem\('claudio\.queueCollapsed'\)/);
-assert.match(js, /localStorage\.setItem\('claudio\.queueCollapsed'/);
+assert.doesNotMatch(js, /localStorage\.getItem\('claudio\.queueCollapsed'\)/);
+assert.doesNotMatch(js, /localStorage\.setItem\('claudio\.queueCollapsed'/);
+assert.match(js, /localStorage\.removeItem\('claudio\.queueCollapsed'\)/);
 assert.match(js, /aria-expanded/);
 
 console.log('queue collapse tests passed');
