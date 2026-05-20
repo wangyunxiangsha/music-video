@@ -85,6 +85,7 @@ function parsePolicyCommand(message) {
 
 module.exports = {
   defaultPolicy,
+  clonePolicy,
   policyFromScene,
   shouldAnnounce,
   formatForPrompt,

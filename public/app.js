@@ -9,9 +9,11 @@
     chatOpen:      false,
     lyricOpen:     false,
     historyOpen:   false,
+    settingsOpen:  false,
     lyricLines:    [],
     userRequested: false,
     queue:         null,
+    settings:      null,
     queueCollapsed:false,
     dailyBriefingKey: '',
   };
@@ -55,6 +57,16 @@
   const btnLyric  = $('btn-lyric');
   const btnHistory= $('btn-history');
   const btnTaste  = $('btn-taste');
+  const btnSettings = $('btn-settings');
+  const statusScene = $('status-scene');
+  const statusRatio = $('status-ratio');
+  const statusDj = $('status-dj');
+  const settingsPanel = $('settings-panel');
+  const settingExternalEnabled = $('setting-external-enabled');
+  const settingExternalRatio = $('setting-external-ratio');
+  const settingRatioValue = $('setting-ratio-value');
+  const settingDjPolicy = $('setting-dj-policy');
+  const settingScene = $('setting-scene');
   const lyricOv   = $('lyric-overlay');
   const lyricScroll = $('lyric-scroll');
   const lyricClose  = $('lyric-close');
@@ -208,6 +220,61 @@
     `).join('');
   }
 
+  function ratioLabel(value) {
+    return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
+  }
+
+  function renderStationStatus(settings = S.settings) {
+    const scene = settings?.scene?.name || '默认电台';
+    const policy = settings?.djPolicy?.name || '正常播报';
+    const rec = settings?.recommendation || {};
+    const ratio = rec.externalEnabled === false ? 'OFF' : ratioLabel(rec.externalRatio);
+    if (statusScene) statusScene.textContent = scene;
+    if (statusRatio) statusRatio.textContent = ratio;
+    if (statusDj) statusDj.textContent = policy;
+  }
+
+  function renderSettingsPanel(settings = S.settings) {
+    if (!settings) return;
+    S.settings = settings;
+    const rec = settings.recommendation || {};
+    if (settingExternalEnabled) settingExternalEnabled.checked = rec.externalEnabled !== false;
+    if (settingExternalRatio) settingExternalRatio.value = String(rec.configuredExternalRatio ?? rec.externalRatio ?? 0.25);
+    if (settingRatioValue) settingRatioValue.textContent = ratioLabel(settingExternalRatio?.value || rec.externalRatio);
+    if (settingDjPolicy) settingDjPolicy.value = settings.djPolicy?.mode || 'normal';
+    if (settingScene) {
+      const scenes = Array.isArray(settings.scenes) ? settings.scenes : [];
+      const current = settings.scene?.id || '';
+      settingScene.innerHTML = '<option value="">默认电台</option>' + scenes.map((scene) =>
+        `<option value="${escapeHtml(scene.id)}">${escapeHtml(scene.name)}</option>`
+      ).join('');
+      settingScene.value = current;
+    }
+    renderStationStatus(settings);
+  }
+
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/settings');
+      const settings = await res.json();
+      renderSettingsPanel(settings);
+    } catch {
+      renderStationStatus(S.settings);
+    }
+  }
+
+  async function saveSettingsPatch(patch) {
+    const res = await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch)
+    });
+    const data = await res.json();
+    if (data.settings) renderSettingsPanel(data.settings);
+    if (data.queue) renderQueue(data.queue);
+    return data;
+  }
+
   function renderQueueFallback(nextTrack, message = '完整队列需要重启服务后同步') {
     if (queueCount) queueCount.textContent = nextTrack ? '1 TRACK' : '0 TRACKS';
     if (!queueList) return;
@@ -304,11 +371,33 @@
       if ('djMessage' in d) typewriter(d.djMessage || '');
       if ('weather' in d) updateWeather(d.weather);
       if ('queue' in d) renderQueue(d.queue);
+      if ('scene' in d || 'djPolicy' in d || d.queue?.recommendation) {
+        S.settings = {
+          ...(S.settings || {}),
+          scene: d.scene ?? S.settings?.scene,
+          djPolicy: d.djPolicy ?? S.settings?.djPolicy,
+          recommendation: d.queue?.recommendation
+            ? { ...(S.settings?.recommendation || {}), ...d.queue.recommendation }
+            : S.settings?.recommendation,
+          scenes: S.settings?.scenes || []
+        };
+        renderStationStatus(S.settings);
+      }
       if ('dailyBriefing' in d) showDailyBriefing(d.dailyBriefing);
     } else if (d.type === 'chat' && d.reply) {
       addBubble('dj', d.reply);
     } else if (d.type === 'queue' && d.queue) {
       renderQueue(d.queue);
+      if (d.queue.recommendation) {
+        S.settings = {
+          ...(S.settings || {}),
+          recommendation: { ...(S.settings?.recommendation || {}), ...d.queue.recommendation }
+        };
+        renderStationStatus(S.settings);
+      }
+    } else if (d.type === 'settings' && d.settings) {
+      renderSettingsPanel(d.settings);
+      if (d.queue) renderQueue(d.queue);
     }
   }
 
@@ -606,6 +695,50 @@
     if (S.chatOpen && quickIn) quickIn.focus();
   };
 
+  if (btnSettings) {
+    btnSettings.onclick = () => {
+      S.settingsOpen = !S.settingsOpen;
+      if (settingsPanel) settingsPanel.hidden = !S.settingsOpen;
+      btnSettings.classList.toggle('active', S.settingsOpen);
+      if (S.settingsOpen) loadSettings();
+    };
+  }
+
+  if (settingExternalEnabled) {
+    settingExternalEnabled.onchange = () => {
+      saveSettingsPatch({ externalEnabled: settingExternalEnabled.checked }).catch(() => {
+        addBubble('dj', '设置暂时没有保存成功，稍后再试。');
+      });
+    };
+  }
+
+  if (settingExternalRatio) {
+    settingExternalRatio.oninput = () => {
+      if (settingRatioValue) settingRatioValue.textContent = ratioLabel(settingExternalRatio.value);
+    };
+    settingExternalRatio.onchange = () => {
+      saveSettingsPatch({ externalRatio: Number(settingExternalRatio.value), externalEnabled: true }).catch(() => {
+        addBubble('dj', '外部推荐比例暂时没有保存成功。');
+      });
+    };
+  }
+
+  if (settingDjPolicy) {
+    settingDjPolicy.onchange = () => {
+      saveSettingsPatch({ djPolicyMode: settingDjPolicy.value }).catch(() => {
+        addBubble('dj', 'DJ 频率暂时没有保存成功。');
+      });
+    };
+  }
+
+  if (settingScene) {
+    settingScene.onchange = () => {
+      saveSettingsPatch({ sceneId: settingScene.value }).catch(() => {
+        addBubble('dj', '默认场景暂时没有保存成功。');
+      });
+    };
+  }
+
   function openChat(focus = false) {
     if (!S.chatOpen) {
       S.chatOpen = true;
@@ -625,6 +758,10 @@
       });
       const data = await res.json();
       if (data.reply) addBubble('dj', data.reply);
+      if (data.queue) renderQueue(data.queue);
+      if (data.djPolicy || data.explorationMode || typeof data.externalRatio === 'number') {
+        loadSettings();
+      }
     } catch {
       addBubble('dj', '信号有点弱，稍后再试~');
     }
@@ -917,6 +1054,7 @@
   // ─── Init ──────────────────────────────────────────────────────────────────
   async function init() {
     initQueueCollapse();
+    loadSettings();
     updateClock();
     setInterval(updateClock, 15000);
     try {

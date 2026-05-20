@@ -116,6 +116,21 @@
       </div>
     </section>
 
+    <section class="status-strip" id="status-strip" aria-label="电台状态">
+      <div class="status-chip">
+        <span>SCENE</span>
+        <strong id="status-scene">默认电台</strong>
+      </div>
+      <div class="status-chip">
+        <span>DISCOVERY</span>
+        <strong id="status-ratio">25%</strong>
+      </div>
+      <div class="status-chip">
+        <span>DJ</span>
+        <strong id="status-dj">正常播报</strong>
+      </div>
+    </section>
+
     <section class="queue-strip" aria-label="播放队列">
       <div class="queue-head">
         <span>QUEUE</span>
@@ -161,6 +176,36 @@
       <button id="quick-send" type="button" title="发送">↑</button>
     </div>
 
+    <section class="settings-panel" id="settings-panel" aria-label="电台设置" hidden>
+      <div class="settings-head">
+        <span>SETTINGS</span>
+        <strong>电台控制</strong>
+      </div>
+      <label class="setting-toggle">
+        <input type="checkbox" id="setting-external-enabled" checked>
+        <span>启用外部推荐</span>
+      </label>
+      <label class="setting-field">
+        <span>外部推荐比例 <strong id="setting-ratio-value">25%</strong></span>
+        <input type="range" id="setting-external-ratio" min="0" max="0.6" step="0.05" value="0.25">
+      </label>
+      <label class="setting-field">
+        <span>DJ 频率</span>
+        <select id="setting-dj-policy">
+          <option value="normal">正常播报</option>
+          <option value="minimal">少说一点</option>
+          <option value="warm">多陪伴一点</option>
+          <option value="silent">只播歌</option>
+        </select>
+      </label>
+      <label class="setting-field">
+        <span>默认场景</span>
+        <select id="setting-scene">
+          <option value="">默认电台</option>
+        </select>
+      </label>
+    </section>
+
     <!-- Footer Nav -->
     <footer>
       <button id="btn-chat" title="聊天 / 点歌">CHAT</button>
@@ -168,6 +213,7 @@
       <button id="btn-lyric" title="查看歌词">LYRIC</button>
       <button id="btn-history" title="播放历史">HIST</button>
       <button id="btn-taste" title="从歌单生成品味档案">TASTE</button>
+      <button id="btn-settings" title="电台设置">SET</button>
     </footer>
 
   </div><!-- .app -->

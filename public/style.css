@@ -75,10 +75,12 @@ body::before {
 .header,
 .hero-panel,
 .deck,
+.status-strip,
 .queue-strip,
 .dj-channel,
 .dj-box,
 .chat,
+.settings-panel,
 .command-row,
 footer {
   position: relative;
@@ -981,6 +983,110 @@ footer button,
 
 .command-row input::placeholder { color: rgba(255,255,255,.32); }
 
+.status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 14px 24px 0;
+}
+
+.status-chip {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  background: rgba(0,0,0,.22);
+}
+
+.status-chip span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 1.3px;
+}
+
+.status-chip strong {
+  display: block;
+  overflow: hidden;
+  color: var(--green);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 12px;
+  margin: 8px 24px 14px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 7px;
+  background:
+    radial-gradient(rgba(255,255,255,.08) 1px, transparent 1px) 0 0 / 12px 12px,
+    rgba(0,0,0,.32);
+}
+
+.settings-panel[hidden] { display: none; }
+
+.settings-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-head span,
+.setting-field span,
+.setting-toggle span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 1.4px;
+}
+
+.settings-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.setting-toggle,
+.setting-field {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.setting-toggle {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.setting-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--green);
+}
+
+.setting-field select,
+.setting-field input[type="range"] {
+  width: 100%;
+}
+
+.setting-field select {
+  height: 34px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 5px;
+  background: rgba(0,0,0,.54);
+  color: var(--soft);
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.setting-field input[type="range"] {
+  accent-color: var(--green);
+}
+
 .command-row {
   display: grid;
   grid-template-columns: 1fr 38px 42px;
@@ -1027,7 +1133,7 @@ footer button,
 
 footer {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 8px;
   padding: 0 24px 22px;
 }
@@ -1303,12 +1409,14 @@ footer button.active {
   .app { border-radius: 22px; }
   .header { padding-inline: 18px; }
   .deck,
+  .status-strip,
   .queue-strip,
   .dj-channel,
   .command-row,
   footer { padding-inline: 18px; }
   .dj-box,
-  .chat { margin-inline: 18px; }
+  .chat,
+  .settings-panel { margin-inline: 18px; }
   .station-name { font-size: 27px; }
   .hero-panel { height: 210px; }
   .theme-pills { display: none; }
@@ -1318,6 +1426,7 @@ footer button.active {
     letter-spacing: .5px;
   }
   .history-panel { padding: 20px 16px; }
+  .status-strip { grid-template-columns: 1fr; }
   .history-stats { grid-template-columns: repeat(2, 1fr); }
   .history-grid { grid-template-columns: 1fr; }
   .history-item { grid-template-columns: 44px minmax(0, 1fr); }

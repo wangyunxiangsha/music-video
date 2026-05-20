@@ -57,11 +57,14 @@ let playlist = [];
 let djMessage = '欢迎收听 Claudio FM，你的个人 AI 复古电台~';
 let chatHistory = [];
 let weatherText = '';
-let activeScene = null;
-let activePolicy = djPolicy.defaultPolicy();
+const defaultScene = scenes.findScene(stats.getPreference('defaultSceneId', ''));
+let activeScene = defaultScene ? { id: defaultScene.id, name: defaultScene.name } : null;
+let activePolicy = defaultScene ? djPolicy.policyFromScene(defaultScene) : djPolicy.defaultPolicy();
 let policyPlayCount = 0;
 let dailyBriefing = null;
 let activeExplorationMode = stats.getPreference('explorationMode', 'balanced');
+let activeExternalRecommendRatio = stats.getPreference('externalRecommendRatio', DEFAULT_EXTERNAL_RECOMMEND_RATIO);
+let activeExternalRecommendEnabled = stats.getPreference('externalRecommendEnabled', true) !== false;
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -87,10 +90,67 @@ function getQueueState(limit = 5) {
 }
 
 function currentExternalRecommendationRatio() {
+  if (!activeExternalRecommendEnabled) return 0;
   return recommendationMixer.ratioForExplorationMode(
     activeExplorationMode,
-    DEFAULT_EXTERNAL_RECOMMEND_RATIO
+    activeExternalRecommendRatio
   );
+}
+
+function getStationSettings() {
+  return {
+    scene: activeScene,
+    djPolicy: activePolicy,
+    recommendation: {
+      explorationMode: activeExplorationMode,
+      externalEnabled: activeExternalRecommendEnabled,
+      externalRatio: currentExternalRecommendationRatio(),
+      configuredExternalRatio: activeExternalRecommendRatio
+    },
+    scenes: scenes.summarizeScenes()
+  };
+}
+
+async function applyStationSettings(input = {}) {
+  const body = input || {};
+
+  if ('externalEnabled' in body) {
+    activeExternalRecommendEnabled = body.externalEnabled !== false;
+    stats.savePreference('externalRecommendEnabled', activeExternalRecommendEnabled);
+  }
+
+  if ('externalRatio' in body) {
+    activeExternalRecommendRatio = recommendationMixer.resolveExternalRecommendationRatio({
+      env: { EXTERNAL_RECOMMEND_RATIO: body.externalRatio },
+      fallback: DEFAULT_EXTERNAL_RECOMMEND_RATIO
+    });
+    activeExplorationMode = 'custom';
+    stats.savePreference('externalRecommendRatio', activeExternalRecommendRatio);
+    stats.savePreference('explorationMode', activeExplorationMode);
+  }
+
+  if (body.djPolicyMode) {
+    activePolicy = djPolicy.clonePolicy(body.djPolicyMode);
+    policyPlayCount = 0;
+  }
+
+  if ('sceneId' in body) {
+    const nextScene = body.sceneId ? scenes.findScene(String(body.sceneId)) : null;
+    activeScene = nextScene ? { id: nextScene.id, name: nextScene.name } : null;
+    if (!body.djPolicyMode) {
+      activePolicy = nextScene ? djPolicy.policyFromScene(nextScene) : activePolicy;
+      policyPlayCount = 0;
+    }
+    stats.savePreference('defaultSceneId', activeScene?.id || '');
+  }
+
+  const nextQueue = await rebuildUpcomingQueue();
+  broadcast({
+    type: 'settings',
+    settings: getStationSettings(),
+    queue: nextQueue
+  });
+  return { settings: getStationSettings(), queue: nextQueue };
 }
 
 function readUserFile(relativePath) {
@@ -988,6 +1048,19 @@ app.get('/api/scenes', (req, res) => {
 
 app.get('/api/dj-policy', (req, res) => {
   res.json({ policy: activePolicy, scene: activeScene });
+});
+
+app.get('/api/settings', (req, res) => {
+  res.json(getStationSettings());
+});
+
+app.patch('/api/settings', async (req, res) => {
+  try {
+    const result = await applyStationSettings(req.body || {});
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 app.post('/api/chat', async (req, res) => {
