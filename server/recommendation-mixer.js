@@ -4,6 +4,20 @@ function artistOf(track) {
   return track?.artists?.[0]?.name || track?.ar?.[0]?.name || '';
 }
 
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function artistMatches(track, artistHint) {
+  const hint = normalizeText(artistHint);
+  if (!hint) return true;
+  const names = [
+    ...(track?.artists || []),
+    ...(track?.ar || [])
+  ].map(a => normalizeText(a?.name)).filter(Boolean);
+  return names.some(name => name.includes(hint) || hint.includes(name));
+}
+
 function trackKey(track) {
   const id = String(track?.id || '').trim();
   if (id) return `id:${id}`;
@@ -72,6 +86,11 @@ function isCleanExternalCandidate(track) {
 function preferCleanVersions(items = []) {
   const clean = (items || []).filter(isCleanExternalCandidate);
   return clean.length ? clean : (items || []);
+}
+
+function preferArtistMatches(items = [], artistHint = '') {
+  if (!artistHint) return items || [];
+  return (items || []).filter(item => artistMatches(item, artistHint));
 }
 
 function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio = 0.75, limit = 80, isBlocked = () => false } = {}) {
@@ -167,5 +186,7 @@ module.exports = {
   ratioForExplorationMode,
   parseExplorationCommand,
   isCleanExternalCandidate,
-  preferCleanVersions
+  preferCleanVersions,
+  preferArtistMatches,
+  artistMatches
 };

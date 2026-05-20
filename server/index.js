@@ -306,7 +306,8 @@ async function findRequestedSong(songName) {
   // ── 1. Netease first ────────────────────────────────────────────────────────
   const neteaseResults = dedupeSongs(await music.searchSongs(query, 10));
   const neteaseClean   = recommendationMixer.preferCleanVersions(neteaseResults);
-  const neteaseRanked  = rankByArtist(neteaseClean, artist);
+  const neteaseArtistMatched = recommendationMixer.preferArtistMatches(neteaseClean, artist);
+  const neteaseRanked  = rankByArtist(neteaseArtistMatched, artist);
   const neteaseOrdered = [
     ...neteaseRanked.filter(isPlayable),
     ...neteaseRanked.filter((s) => !isPlayable(s))
@@ -322,14 +323,9 @@ async function findRequestedSong(songName) {
     console.log(`网易云未找到，尝试 QQ 音乐: ${query}`);
     const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
     const qqClean    = recommendationMixer.preferCleanVersions(qqResults);
-    const qqRanked   = rankByArtist(qqClean, artist);
-    const qqFiltered = artist
-      ? qqRanked.filter((s) => {
-          const hint  = artist.toLowerCase();
-          const names = (s.artists || []).map((a) => (a.name || '').toLowerCase());
-          return names.some((n) => n.includes(hint) || hint.includes(n));
-        })
-      : qqRanked.slice(0, 1);
+    const qqArtistMatched = recommendationMixer.preferArtistMatches(qqClean, artist);
+    const qqRanked   = rankByArtist(qqArtistMatched, artist);
+    const qqFiltered = artist ? qqRanked : qqRanked.slice(0, 1);
     for (const candidate of qqFiltered.slice(0, 3)) {
       const url = await qqmusic.getSongUrl(candidate._qqmid);
       if (url) return candidate;

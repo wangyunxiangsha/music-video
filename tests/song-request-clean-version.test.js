@@ -6,5 +6,7 @@ const index = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 
 
 assert.match(index, /preferCleanVersions\(neteaseResults\)/);
 assert.match(index, /preferCleanVersions\(qqResults\)/);
+assert.match(index, /preferArtistMatches\(neteaseClean, artist\)/);
+assert.match(index, /preferArtistMatches\(qqClean, artist\)/);
 
 console.log('song request clean version tests passed');
