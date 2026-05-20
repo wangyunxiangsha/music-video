@@ -22,6 +22,7 @@ const djPolicy  = require('./dj-policy');
 const queue     = require('./queue');
 const dailyStation = require('./daily-station');
 const recommendationMixer = require('./recommendation-mixer');
+const recommendationExplainer = require('./recommendation-explainer');
 const playability = require('./playability');
 const playbackDiagnostics = require('./playback-diagnostics');
 
@@ -308,6 +309,10 @@ function wantsNextTrack(message) {
   return NEXT_PATTERNS.some(p => p.test(message.trim()));
 }
 
+function isWhyThisSongCommand(message) {
+  return /(为什么放这首|为什么播这首|为什么推荐这首|为啥放这首|这首为什么)/.test(String(message || '').trim());
+}
+
 function dedupeSongs(songs) {
   const seen = new Set();
   return songs.filter(song => {
@@ -515,6 +520,7 @@ function boostPlaylistByTaste(pool) {
   const topCategories = new Set((signals.topCategories || []).map(i => i.name));
   const hasFeedback = feedbackSignals.likedTrackKeys.size
     || feedbackSignals.dislikedTrackKeys.size
+    || feedbackSignals.temporaryReducedTrackKeys.size
     || feedbackSignals.blockedArtists.size
     || feedbackSignals.blockedCategories.size
     || feedbackSignals.boostArtists.size
@@ -536,6 +542,7 @@ function boostPlaylistByTaste(pool) {
       if (topArtists.has(artist)) s += 3;
       if (track.categoryName && topCategories.has(track.categoryName)) s += 2;
       if (feedbackSignals.likedTrackKeys.has(trackKey)) s += 5;
+      if (feedbackSignals.temporaryReducedTrackKeys.has(trackKey)) s -= 8;
       if (feedbackSignals.boostArtists.has(artist)) s += 4;
       if (feedbackSignals.reduceArtists.has(artist)) s -= 4;
       if ((signals.recentSongs || []).includes(track.name)) s -= 4;
@@ -1105,6 +1112,20 @@ app.post('/api/chat', async (req, res) => {
     chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
     if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
     return res.json({ reply, feedback: true, action: feedbackAction.type, target: feedbackAction.target });
+  }
+
+  if (isWhyThisSongCommand(message)) {
+    const reply = recommendationExplainer.explainTrack(currentTrack, {
+      scene: activeScene,
+      djPolicy: activePolicy,
+      recommendation: {
+        explorationMode: activeExplorationMode,
+        externalRatio: currentExternalRecommendationRatio()
+      }
+    });
+    chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    return res.json({ reply, explain: true });
   }
 
   if (wantsNextTrack(message)) {

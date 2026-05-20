@@ -28,6 +28,12 @@ const WORDS = {
     '\u522b\u653e\u8fd9\u7c7b',
     '\u5c11\u653e\u8fd9\u79cd',
     '\u4e0d\u60f3\u542c\u8fd9\u79cd'
+  ],
+  notVibe: [
+    '\u8fd9\u9996\u4e0d\u5bf9\u5473',
+    '\u4e0d\u5bf9\u5473',
+    '\u73b0\u5728\u4e0d\u60f3\u542c\u8fd9\u9996',
+    '\u4e0d\u592a\u5408\u9002\u73b0\u5728'
   ]
 };
 
@@ -61,6 +67,16 @@ function parseFeedback(message, currentTrack) {
       target: 'track',
       track: currentTrack,
       reply: '\u597d\uff0c\u8fd9\u9996\u4ee5\u540e\u4f1a\u5c11\u51fa\u73b0\u3002'
+    };
+  }
+
+  if (includesAny(text, WORDS.notVibe)) {
+    return {
+      type: 'not_vibe',
+      target: 'track',
+      track: currentTrack,
+      temporary: true,
+      reply: '\u660e\u767d\uff0c\u8fd9\u9996\u4e0d\u662f\u8ba8\u538c\uff0c\u53ea\u662f\u4eca\u5929\u5148\u5c11\u5b89\u6392\u8fd9\u4e2a\u65b9\u5411\u3002'
     };
   }
 

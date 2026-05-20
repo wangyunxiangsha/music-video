@@ -48,6 +48,16 @@ function uniqueTracks(items, isBlocked = () => false, seen = new Set()) {
   return result;
 }
 
+function withRecommendationReason(track, source) {
+  if (!track) return track;
+  if (track.recommendationReason) return track;
+  if (source === 'external') {
+    const reason = track.sourceReason || '你的近期口味';
+    return { ...track, recommendationReason: `因为「${reason}」推荐` };
+  }
+  return { ...track, recommendationSource: track.recommendationSource || 'local', recommendationReason: '来自你的歌单' };
+}
+
 function clampRatio(value, fallback = 0.25) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -125,19 +135,19 @@ function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio 
 
   while (mixed.length < limit && (localIndex < locals.length || externalIndex < externals.length)) {
     for (let i = 0; i < localSlots && localIndex < locals.length && mixed.length < limit; i += 1) {
-      mixed.push(locals[localIndex]);
+      mixed.push(withRecommendationReason(locals[localIndex], 'local'));
       localIndex += 1;
     }
     for (let i = 0; i < externalSlots && externalIndex < externals.length && mixed.length < limit; i += 1) {
-      mixed.push(externals[externalIndex]);
+      mixed.push(withRecommendationReason(externals[externalIndex], 'external'));
       externalIndex += 1;
     }
     if (localIndex >= locals.length && externalIndex < externals.length) {
-      mixed.push(externals[externalIndex]);
+      mixed.push(withRecommendationReason(externals[externalIndex], 'external'));
       externalIndex += 1;
     }
     if (externalIndex >= externals.length && localIndex < locals.length) {
-      mixed.push(locals[localIndex]);
+      mixed.push(withRecommendationReason(locals[localIndex], 'local'));
       localIndex += 1;
     }
   }
@@ -174,6 +184,7 @@ function normalizeSearchTrack(track, reason) {
     source: track.source || (String(track.id).startsWith('qq:') ? 'qq' : 'netease'),
     recommendationSource: 'external',
     sourceReason: reason,
+    recommendationReason: `因为「${reason}」推荐`,
     privilege: track.privilege || { pl: 1 }
   };
 }

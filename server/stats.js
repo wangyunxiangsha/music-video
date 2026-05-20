@@ -91,17 +91,20 @@ function normalizeTrackKey(track = {}) {
 
 function saveFeedback(action) {
   const db = load();
+  const now = Math.floor(Date.now() / 1000);
   const entry = {
     id: Date.now(),
     type: action.type,
     target: action.target || 'track',
     value: action.value || '',
+    temporary: Boolean(action.temporary),
     track_id: action.track?.id ? String(action.track.id) : '',
     track_key: action.track ? normalizeTrackKey(action.track) : '',
     song_name: action.track?.name || '',
     artist: action.track?.artists?.[0]?.name || action.track?.ar?.[0]?.name || '',
     category: action.track?.categoryName || '',
-    created_at: Math.floor(Date.now() / 1000)
+    created_at: now,
+    expires_at: action.temporary ? now + 24 * 60 * 60 : null
   };
   db.feedback.unshift(entry);
   if (db.feedback.length > 500) db.feedback = db.feedback.slice(0, 500);
@@ -110,10 +113,14 @@ function saveFeedback(action) {
 }
 
 function getFeedbackSignals(limit = 200) {
-  const events = load().feedback.slice(0, limit);
+  const now = Math.floor(Date.now() / 1000);
+  const events = load().feedback
+    .filter(e => !e.expires_at || e.expires_at > now)
+    .slice(0, limit);
   return {
     likedTrackKeys: new Set(events.filter(e => e.type === 'like' && e.track_key).map(e => e.track_key)),
     dislikedTrackKeys: new Set(events.filter(e => e.type === 'dislike' && e.track_key).map(e => e.track_key)),
+    temporaryReducedTrackKeys: new Set(events.filter(e => e.type === 'not_vibe' && e.track_key).map(e => e.track_key)),
     blockedArtists: new Set(events.filter(e => e.type === 'block' && e.target === 'artist').map(e => e.value)),
     blockedCategories: new Set(events.filter(e => e.type === 'block' && e.target === 'category').map(e => e.value)),
     boostArtists: new Set(events.filter(e => e.type === 'boost' && e.target === 'artist').map(e => e.value)),

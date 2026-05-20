@@ -12,11 +12,14 @@ function compactTrack(track) {
     artist: artistOf(track),
     album: track.album?.name || track.al?.name || '',
     categoryName: track.categoryName || '',
-    source: track.source || ''
+    source: track.source || '',
+    recommendationSource: track.recommendationSource || '',
+    sourceReason: track.sourceReason || '',
+    recommendationReason: track.recommendationReason || ''
   };
 }
 
-function summarizeQueue({ currentTrack = null, playlist = [], limit = 5, scene = null, djPolicy = null } = {}) {
+function summarizeQueue({ currentTrack = null, playlist = [], limit = 5, scene = null, djPolicy = null, recommendation = null } = {}) {
   const safePlaylist = Array.isArray(playlist) ? playlist : [];
   const max = Math.max(1, Math.min(20, Number(limit) || 5));
   return {
@@ -24,7 +27,8 @@ function summarizeQueue({ currentTrack = null, playlist = [], limit = 5, scene =
     next: safePlaylist.slice(0, max).map(compactTrack).filter(Boolean),
     count: safePlaylist.length,
     scene,
-    djPolicy
+    djPolicy,
+    recommendation
   };
 }
 
