@@ -54,6 +54,19 @@ async function run() {
   ], 'sing');
   assert.deepStrictEqual(noArtistFallback, []);
 
+  assert.strictEqual(mixer.originalArtistForSong('寄明月'), 'SING女团');
+  assert.strictEqual(mixer.originalArtistForSong('夜笙歌'), 'SING女团');
+  const originalPreferred = mixer.preferOriginalArtist([
+    track('cover2', '夜笙歌', '小贝酱酱酱'),
+    track('original2', '夜笙歌', 'SING女团')
+  ], '夜笙歌');
+  assert.deepStrictEqual(originalPreferred.map(item => item.id), ['original2']);
+
+  const originalFallback = mixer.preferOriginalArtist([
+    track('cover3', '夜笙歌', '小贝酱酱酱')
+  ], '夜笙歌');
+  assert.deepStrictEqual(originalFallback.map(item => item.id), ['cover3']);
+
   const localOnly = mixer.mixRecommendationQueue({ localPool, externalPool, localRatio: 1, limit: 6 });
   assert.deepStrictEqual(localOnly.map(item => item.id), ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']);
 

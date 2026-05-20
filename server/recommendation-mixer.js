@@ -18,6 +18,18 @@ function artistMatches(track, artistHint) {
   return names.some(name => name.includes(hint) || hint.includes(name));
 }
 
+const ORIGINAL_ARTISTS = new Map([
+  ['寄明月', 'SING女团'],
+  ['夜笙歌', 'SING女团']
+]);
+
+function originalArtistForSong(songName) {
+  const text = String(songName || '').trim();
+  if (!text) return '';
+  const normalized = text.replace(/[《》「」【】]/g, '').trim();
+  return ORIGINAL_ARTISTS.get(normalized) || '';
+}
+
 function trackKey(track) {
   const id = String(track?.id || '').trim();
   if (id) return `id:${id}`;
@@ -91,6 +103,13 @@ function preferCleanVersions(items = []) {
 function preferArtistMatches(items = [], artistHint = '') {
   if (!artistHint) return items || [];
   return (items || []).filter(item => artistMatches(item, artistHint));
+}
+
+function preferOriginalArtist(items = [], songName = '') {
+  const originalArtist = originalArtistForSong(songName);
+  if (!originalArtist) return items || [];
+  const matched = preferArtistMatches(items, originalArtist);
+  return matched.length ? matched : (items || []);
 }
 
 function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio = 0.75, limit = 80, isBlocked = () => false } = {}) {
@@ -188,5 +207,7 @@ module.exports = {
   isCleanExternalCandidate,
   preferCleanVersions,
   preferArtistMatches,
-  artistMatches
+  artistMatches,
+  originalArtistForSong,
+  preferOriginalArtist
 };

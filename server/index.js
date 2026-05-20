@@ -301,13 +301,14 @@ async function findRequestedSong(songName) {
   // Parse "周杰伦的稻香" → search with full artist+song query for precision
   const parsed = parseArtistSong(songName);
   const query  = parsed ? `${parsed.artist} ${parsed.song}` : songName;
-  const artist = parsed?.artist || null;
+  const artist = parsed?.artist || recommendationMixer.originalArtistForSong(songName) || null;
 
   // ── 1. Netease first ────────────────────────────────────────────────────────
   const neteaseResults = dedupeSongs(await music.searchSongs(query, 10));
   const neteaseClean   = recommendationMixer.preferCleanVersions(neteaseResults);
   const neteaseArtistMatched = recommendationMixer.preferArtistMatches(neteaseClean, artist);
-  const neteaseRanked  = rankByArtist(neteaseArtistMatched, artist);
+  const neteaseOriginalPreferred = recommendationMixer.preferOriginalArtist(neteaseArtistMatched, songName);
+  const neteaseRanked  = rankByArtist(neteaseOriginalPreferred, artist);
   const neteaseOrdered = [
     ...neteaseRanked.filter(isPlayable),
     ...neteaseRanked.filter((s) => !isPlayable(s))
@@ -324,7 +325,8 @@ async function findRequestedSong(songName) {
     const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
     const qqClean    = recommendationMixer.preferCleanVersions(qqResults);
     const qqArtistMatched = recommendationMixer.preferArtistMatches(qqClean, artist);
-    const qqRanked   = rankByArtist(qqArtistMatched, artist);
+    const qqOriginalPreferred = recommendationMixer.preferOriginalArtist(qqArtistMatched, songName);
+    const qqRanked   = rankByArtist(qqOriginalPreferred, artist);
     const qqFiltered = artist ? qqRanked : qqRanked.slice(0, 1);
     for (const candidate of qqFiltered.slice(0, 3)) {
       const url = await qqmusic.getSongUrl(candidate._qqmid);
