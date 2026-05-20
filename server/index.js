@@ -287,7 +287,7 @@ function rankByArtist(candidates, artistHint) {
 
 async function resolveSongUrl(track) {
   if (track.source === 'qq') {
-    return qqmusic.getSongUrl(track._qqmid);
+    return qqmusic.getSongUrl(track._qqmid, track._qqMediaMid);
   }
   return music.getSongUrl(track.id);
 }
@@ -329,7 +329,7 @@ async function findRequestedSong(songName) {
     const qqRanked   = rankByArtist(qqOriginalPreferred, artist);
     const qqFiltered = artist ? qqRanked : qqRanked.slice(0, 1);
     for (const candidate of qqFiltered.slice(0, 3)) {
-      const url = await qqmusic.getSongUrl(candidate._qqmid);
+      const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
       if (url) return candidate;
     }
   }
@@ -638,8 +638,8 @@ app.get('/api/debug/qqtest', async (req, res) => {
     const results = await qqmusic.searchSongs('晴天 周杰伦', 3);
     if (!results.length) return res.json({ ok: false, reason: 'search returned 0 results' });
     const song = results[0];
-    const url  = await qqmusic.getSongUrl(song._qqmid);
-    res.json({ ok: !!url, song: song.name, artist: song.artists?.[0]?.name, mid: song._qqmid, url: url || null });
+    const url  = await qqmusic.getSongUrl(song._qqmid, song._qqMediaMid);
+    res.json({ ok: !!url, song: song.name, artist: song.artists?.[0]?.name, mid: song._qqmid, mediaMid: song._qqMediaMid || '', url: url || null });
   } catch (e) {
     res.json({ ok: false, error: e.message });
   }
@@ -857,10 +857,10 @@ app.get('/api/music/url/:id', async (req, res) => {
 });
 
 // Resolve audio URL from either Netease or QQ Music
-async function resolveAudioUrl(id) {
+async function resolveAudioUrl(id, track = null) {
   if (String(id).startsWith('qq:')) {
     const mid = String(id).slice(3);
-    return qqmusic.getSongUrl(mid);
+    return qqmusic.getSongUrl(mid, track?._qqMediaMid);
   }
   return music.getSongUrl(id);
 }
@@ -870,7 +870,7 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
   const id  = req.params.id;
   const track = trackForPlaybackId(id);
   try {
-    const url = await resolveAudioUrl(id);
+    const url = await resolveAudioUrl(id, track);
     if (!url) {
       await handlePlaybackFailure({
         stage: 'stream',

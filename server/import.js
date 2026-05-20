@@ -77,6 +77,7 @@ async function importQQ(qqmusic) {
         const songs = await qqmusic.getPlaylistSongs(dissid);
         const formatted = songs.map(s => ({
           mid:     s.mid || s.songmid || s.strMediaMid || '',
+          mediaMid: qqmusic.mediaMidFromSong ? qqmusic.mediaMidFromSong(s) : (s.file?.media_mid || s.strMediaMid || ''),
           name:    s.name || s.title || s.songname || s.songorig || '',
           artists: (s.singer || []).map(a => a.name).filter(Boolean),
           album:   s.album?.name || s.albumname || ''
@@ -165,6 +166,8 @@ function buildPlaylistPool() {
     p.songs.map(s => ({
       id: `qq:${s.mid}`,
       source: 'qq',
+      _qqmid: s.mid,
+      _qqMediaMid: s.mediaMid || '',
       name: s.name,
       artists: s.artists.map(n => ({ name: n })),
       album: { name: s.album },

@@ -121,6 +121,20 @@ function guid() {
   ).join('');
 }
 
+function mediaMidFromSong(song = {}) {
+  return song.file?.media_mid
+    || song.file?.strMediaMid
+    || song.file?.mediaMid
+    || song.strMediaMid
+    || song.media_mid
+    || song.mediaMid
+    || '';
+}
+
+function buildQQFilename(songmid, mediaMid, quality, ext) {
+  return `${quality}${songmid}${mediaMid || ''}.${ext}`;
+}
+
 // ─── Search ────────────────────────────────────────────────────────────────────
 async function searchSongs(keywords, limit = 10) {
   try {
@@ -176,6 +190,7 @@ async function searchFallback(keywords, limit) {
           : ''
       },
       _qqmid: s.songmid,
+      _qqMediaMid: mediaMidFromSong(s),
       source: 'qq',
       privilege: { pl: 1 }
     }));
@@ -196,13 +211,14 @@ function formatSong(s) {
     artists: (s.singer || []).map((a) => ({ name: a.name })),
     album:   { name: s.album?.name || '', picUrl: pic },
     _qqmid:  mid,
+    _qqMediaMid: mediaMidFromSong(s),
     source:  'qq',
     privilege: { pl: 1 }
   };
 }
 
 // ─── Song URL ──────────────────────────────────────────────────────────────────
-async function getSongUrl(songmid) {
+async function getSongUrl(songmid, mediaMid = '') {
   if (!QQ_COOKIE) {
     console.warn('QQ_MUSIC_COOKIE 未配置，无法获取 QQ 音乐链接');
     return null;
@@ -224,7 +240,7 @@ async function getSongUrl(songmid) {
   // Try formats in order; probe CDN before returning to avoid silent 404s
   // M800/M500 = 超级会员; C400 = 绿钻可能可用; M128/C128 = 普通会员可用
   for (const { quality, ext } of QQ_QUALITY_FALLBACKS) {
-    const filename = `${quality}${songmid}.${ext}`;
+    const filename = buildQQFilename(songmid, mediaMid, quality, ext);
     try {
       const body = {
         req_0: {
@@ -427,6 +443,8 @@ module.exports = {
   resetCircuit,
   isEnabled: () => !!QQ_COOKIE,
   extractUin,
+  mediaMidFromSong,
+  buildQQFilename,
   QQ_QUALITY_FALLBACKS,
   summarizeQualityAttempts
 };

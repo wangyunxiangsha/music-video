@@ -1,5 +1,13 @@
 # Claudio FM 阶段成果与下一阶段工作
 
+## 2026-05-20 QQ 音乐播放链路修复补充
+
+- 已参考 `jsososo/QQMusicApi` 的播放 URL 生成方式，确认部分 QQ 歌曲只用 `songmid` 拼接 filename 会出现“接口返回 purl，但 CDN 实际 404”的问题。
+- 已在 QQ 搜索结果和 QQ 歌单导入中保留 `mediaMid / strMediaMid / file.media_mid`，并在获取播放 URL 时使用 `songmid + mediaMid` 生成 filename。
+- 已覆盖点歌、队列播放、音频代理、QQ 调试接口和本地导入歌单场景，避免只有搜索点歌可用、歌单播放仍丢失 mediaMid。
+- 已后台验证更新后的 `QQ_MUSIC_COOKIE`：`夜笙歌`、`寄明月` 均选中 SING女团原唱，M800 CDN probe 返回 `206`，当前 Cookie 与新 filename 拼法可以拿到可播放链接。
+- 已补充 `tests/qqmusic-quality-fallback.test.js`，覆盖 `mediaMid` 提取与 QQ filename 拼接规则；全量 `tests/*.test.js` 已通过。
+
 更新时间：2026-05-20
 
 ## 2026-05-20 阶段小结
