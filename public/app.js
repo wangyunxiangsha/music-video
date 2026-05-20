@@ -338,6 +338,21 @@
     }
   }
 
+  async function reportPlaybackFailure(reason, detail = '') {
+    try {
+      await fetch('/api/playback/failure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: S.track?.id,
+          stage: 'client',
+          reason,
+          detail
+        })
+      });
+    } catch {}
+  }
+
   function requestNextTrack(reason) {
     stopCurrentDjVoice(true);
     if (reason) addBubble('dj', reason);
@@ -436,6 +451,7 @@
       S.userRequested = false;
       const name = S.track?.name || '该歌曲';
       console.warn(`User-requested track failed: ${name}`);
+      reportPlaybackFailure('client_error', 'user requested track failed');
       addBubble('dj', `《${name}》当前音源暂时打不开，可能是链接过期或平台临时限制。试试换一首？`);
       if (!S.chatOpen) {
         // Briefly open chat so user sees the message
@@ -445,6 +461,7 @@
       }
     } else {
       console.warn('Audio error — requesting next track');
+      reportPlaybackFailure('client_error', 'audio element error');
       requestNextTrack(`《${S.track?.name || '该歌曲'}》当前音源暂时打不开，已跳过。`);
     }
   };
@@ -474,6 +491,7 @@
     }
     if (Date.now() - lastProgressAt > PLAYBACK_STALL_MS) {
       console.warn('Playback stalled — requesting next track');
+      reportPlaybackFailure('stalled', `no progress for ${PLAYBACK_STALL_MS}ms`);
       requestNextTrack(`《${S.track?.name || '该歌曲'}》播放卡住了，马上换下一首。`);
     }
   }, 5000);

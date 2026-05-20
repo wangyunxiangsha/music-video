@@ -23,6 +23,7 @@ const queue     = require('./queue');
 const dailyStation = require('./daily-station');
 const recommendationMixer = require('./recommendation-mixer');
 const playability = require('./playability');
+const playbackDiagnostics = require('./playback-diagnostics');
 
 const app = express();
 const server = http.createServer(app);
@@ -103,6 +104,27 @@ async function ensureDailyBriefing(now = new Date()) {
 
 function broadcastQueue() {
   broadcast({ type: 'queue', queue: getQueueState() });
+}
+
+function trackForPlaybackId(id) {
+  if (currentTrack && String(currentTrack.id) === String(id)) return currentTrack;
+  const found = playlist.find((track) => String(track.id) === String(id));
+  return found || { id, source: String(id).startsWith('qq:') ? 'qq' : 'netease' };
+}
+
+async function handlePlaybackFailure(event = {}) {
+  const result = playbackDiagnostics.recordFailure(event);
+  console.warn(
+    `播放失败记录: stage=${event.stage || 'unknown'}, reason=${event.reason || 'unknown'}, `
+    + `count=${result.consecutiveFailures}/${playbackDiagnostics.snapshot().rebuildThreshold}`
+  );
+  if (result.shouldRebuild) {
+    console.warn('连续播放失败达到阈值，正在重建后续队列');
+    await rebuildUpcomingQueue();
+    playbackDiagnostics.recordRebuild(event.reason || 'consecutive_failures');
+    broadcastQueue();
+  }
+  return result;
 }
 
 wss.on('connection', (ws) => {
@@ -601,6 +623,34 @@ app.get('/api/debug/qq-circuit', (req, res) => {
   res.json(qqmusic.getCircuitState());
 });
 
+app.get('/api/debug/playback', (req, res) => {
+  res.json({
+    ...playbackDiagnostics.snapshot(),
+    currentTrack: playbackDiagnostics.summarizeTrack(currentTrack),
+    queue: getQueueState()
+  });
+});
+
+app.post('/api/playback/failure', async (req, res) => {
+  const { id, stage, reason, detail } = req.body || {};
+  try {
+    const result = await handlePlaybackFailure({
+      stage: stage || 'client',
+      reason: reason || 'client_report',
+      detail,
+      track: id ? trackForPlaybackId(id) : currentTrack
+    });
+    res.json({
+      ok: true,
+      rebuilt: result.shouldRebuild,
+      diagnostics: playbackDiagnostics.snapshot(),
+      queue: getQueueState()
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 app.get('/api/feedback', (req, res) => {
   const signals = stats.getFeedbackSignals(200);
   res.json({
@@ -791,10 +841,20 @@ async function resolveAudioUrl(id) {
 
 // Proxy audio stream to avoid CORS issues and handle both sources
 app.get('/api/music/stream/:id(*)', async (req, res) => {
+  const id  = req.params.id;
+  const track = trackForPlaybackId(id);
   try {
-    const id  = req.params.id;
     const url = await resolveAudioUrl(id);
-    if (!url) return res.status(404).json({ error: '该歌曲暂不可播放，可能受版权限制' });
+    if (!url) {
+      await handlePlaybackFailure({
+        stage: 'stream',
+        reason: 'url_unavailable',
+        status: 404,
+        hasRange: Boolean(req.headers.range),
+        track
+      });
+      return res.status(404).json({ error: '该歌曲暂不可播放，可能受版权限制' });
+    }
 
     const isQQ = String(id).startsWith('qq:');
 
@@ -823,6 +883,7 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
       validateStatus: (status) => status >= 200 && status < 300,
       headers: streamHeaders
     });
+    playbackDiagnostics.recordSuccess(trackForPlaybackId(id));
 
     if (response.status === 206) {
       res.status(206);
@@ -839,6 +900,13 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
     const upstream = response.data;
     upstream.on('error', (streamError) => {
       console.warn('Audio upstream stream error:', streamError.message);
+      handlePlaybackFailure({
+        stage: 'stream',
+        reason: 'upstream_stream_error',
+        detail: streamError.message,
+        hasRange: Boolean(req.headers.range),
+        track
+      }).catch((failureError) => console.warn('Playback failure handler error:', failureError.message));
       if (!res.headersSent) {
         res.status(502).json({ error: '音频源连接中断' });
       } else {
@@ -851,6 +919,14 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
     upstream.pipe(res);
   } catch (e) {
     console.error('Audio stream error:', e.message, e.response?.status);
+    await handlePlaybackFailure({
+      stage: 'stream',
+      reason: e.response?.status ? 'upstream_http_error' : 'stream_request_error',
+      status: e.response?.status || null,
+      detail: e.message,
+      hasRange: Boolean(req.headers.range),
+      track
+    });
     if (!res.headersSent) {
       res.status(502).json({ error: '音频流获取失败' });
     } else {
