@@ -31,6 +31,9 @@ const wss = new WebSocketServer({ server, path: '/stream' });
 
 const PORT = Number(process.env.PORT || 8080);
 const PORT_RETRY_LIMIT = Number(process.env.PORT_RETRY_LIMIT || 10);
+const DEFAULT_EXTERNAL_RECOMMEND_RATIO = recommendationMixer.resolveExternalRecommendationRatio({
+  env: process.env
+});
 
 app.use(cors());
 app.use(express.json());
@@ -58,6 +61,7 @@ let activeScene = null;
 let activePolicy = djPolicy.defaultPolicy();
 let policyPlayCount = 0;
 let dailyBriefing = null;
+let activeExplorationMode = stats.getPreference('explorationMode', 'balanced');
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -74,8 +78,19 @@ function getQueueState(limit = 5) {
     playlist,
     limit,
     scene: activeScene,
-    djPolicy: activePolicy
+    djPolicy: activePolicy,
+    recommendation: {
+      explorationMode: activeExplorationMode,
+      externalRatio: currentExternalRecommendationRatio()
+    }
   });
+}
+
+function currentExternalRecommendationRatio() {
+  return recommendationMixer.ratioForExplorationMode(
+    activeExplorationMode,
+    DEFAULT_EXTERNAL_RECOMMEND_RATIO
+  );
 }
 
 function readUserFile(relativePath) {
@@ -471,19 +486,22 @@ function boostPlaylistByTaste(pool) {
 }
 
 async function buildSmartQueue(localPool, { scene = activeScene, limit = 80 } = {}) {
-  const externalPool = await recommendationMixer.buildExternalRecommendationPool({
-    music,
-    qqmusic,
-    tasteSignals: stats.getTasteSignals(120),
-    scene,
-    slot: dailyBriefing || dailyStation.getTimeSlot(new Date()),
-    limit: Math.max(12, Math.ceil(limit * 0.35)),
-    isBlocked: stats.isTrackBlocked
-  });
+  const externalRatio = currentExternalRecommendationRatio();
+  const externalPool = externalRatio > 0
+    ? await recommendationMixer.buildExternalRecommendationPool({
+        music,
+        qqmusic,
+        tasteSignals: stats.getTasteSignals(120),
+        scene,
+        slot: dailyBriefing || dailyStation.getTimeSlot(new Date()),
+        limit: Math.max(8, Math.ceil(limit * Math.max(externalRatio, 0.15))),
+        isBlocked: stats.isTrackBlocked
+      })
+    : [];
   const mixed = recommendationMixer.mixRecommendationQueue({
     localPool: boostPlaylistByTaste(localPool),
     externalPool,
-    localRatio: 0.75,
+    localRatio: 1 - externalRatio,
     limit,
     isBlocked: stats.isTrackBlocked
   });
@@ -536,7 +554,7 @@ async function loadPlaylist() {
     const pool = importer.buildPlaylistPool();
     if (pool.length > 0) {
       playlist = await buildSmartQueue(pool, { limit: 120 });
-      console.log(`✓ 加载智能队列 ${playlist.length} 首（75% 本地歌单 / 25% 外部推荐）`);
+      console.log(`✓ 加载智能队列 ${playlist.length} 首（外部推荐 ${Math.round(currentExternalRecommendationRatio() * 100)}%）`);
       return;
     }
   } catch (e) {
@@ -987,6 +1005,24 @@ app.post('/api/chat', async (req, res) => {
     chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
     if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
     return res.json({ reply, policy: activePolicy.mode, djPolicy: activePolicy });
+  }
+
+  const explorationCommand = recommendationMixer.parseExplorationCommand(message);
+  if (explorationCommand) {
+    activeExplorationMode = explorationCommand.mode;
+    stats.savePreference('explorationMode', activeExplorationMode);
+    const nextQueue = await rebuildUpcomingQueue();
+    const externalRatio = currentExternalRecommendationRatio();
+    const reply = `${explorationCommand.reply} 当前外部推荐比例约 ${Math.round(externalRatio * 100)}%。`;
+    chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    return res.json({
+      reply,
+      recommendation: true,
+      explorationMode: activeExplorationMode,
+      externalRatio,
+      queue: nextQueue
+    });
   }
 
   const feedbackAction = feedback.parseFeedback(message, currentTrack);

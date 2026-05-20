@@ -32,6 +32,9 @@ async function run() {
   );
   assert.strictEqual(mixed.filter(item => item.recommendationSource === 'external').length, 2);
 
+  const localOnly = mixer.mixRecommendationQueue({ localPool, externalPool, localRatio: 1, limit: 6 });
+  assert.deepStrictEqual(localOnly.map(item => item.id), ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']);
+
   const deduped = mixer.mixRecommendationQueue({
     localPool: [track('same', 'Same'), track('l2', 'Local 2')],
     externalPool: [track('same', 'Same', 'Artist', { recommendationSource: 'external' }), track('e1', 'External 1', 'New', { recommendationSource: 'external' })],
@@ -50,7 +53,13 @@ async function run() {
 
   const fakeMusic = {
     async searchSongs(query) {
-      if (query.includes('林俊杰')) return [track('n1', '新推荐', '林俊杰', { privilege: { pl: 1 } })];
+      if (query.includes('林俊杰')) {
+        return [
+          track('bad1', '新推荐 Live', '林俊杰', { privilege: { pl: 1 } }),
+          track('bad2', '新推荐 DJ Remix', '林俊杰', { privilege: { pl: 1 } }),
+          track('n1', '新推荐', '林俊杰', { privilege: { pl: 1 } })
+        ];
+      }
       return [];
     }
   };
@@ -61,6 +70,16 @@ async function run() {
   });
   assert.strictEqual(external[0].recommendationSource, 'external');
   assert.strictEqual(external[0].sourceReason, '林俊杰');
+  assert.deepStrictEqual(external.map(item => item.id), ['n1']);
+
+  assert.strictEqual(mixer.resolveExternalRecommendationRatio({ env: { EXTERNAL_RECOMMEND_RATIO: '0.4' } }), 0.4);
+  assert.strictEqual(mixer.resolveExternalRecommendationRatio({ env: { EXTERNAL_RECOMMEND_RATIO: 'bad' } }), 0.25);
+  assert.strictEqual(mixer.ratioForExplorationMode('localOnly', 0.25), 0);
+  assert.strictEqual(mixer.ratioForExplorationMode('conservative', 0.25), 0.1);
+  assert.strictEqual(mixer.ratioForExplorationMode('discovery', 0.25), 0.4);
+  assert.strictEqual(mixer.parseExplorationCommand('保守一点')?.mode, 'conservative');
+  assert.strictEqual(mixer.parseExplorationCommand('多发现新歌')?.mode, 'discovery');
+  assert.strictEqual(mixer.parseExplorationCommand('只听我的歌单')?.mode, 'localOnly');
 
   console.log('recommendation mixer tests passed');
 }

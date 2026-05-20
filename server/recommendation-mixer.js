@@ -22,12 +22,60 @@ function uniqueTracks(items, isBlocked = () => false, seen = new Set()) {
   return result;
 }
 
+function clampRatio(value, fallback = 0.25) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(0.8, Math.max(0, n));
+}
+
+function resolveExternalRecommendationRatio({ env = process.env, fallback = 0.25 } = {}) {
+  return clampRatio(env.EXTERNAL_RECOMMEND_RATIO, fallback);
+}
+
+function ratioForExplorationMode(mode, fallback = 0.25) {
+  if (mode === 'localOnly') return 0;
+  if (mode === 'conservative') return 0.1;
+  if (mode === 'discovery') return 0.4;
+  return clampRatio(fallback, 0.25);
+}
+
+function parseExplorationCommand(message) {
+  const text = String(message || '').trim();
+  if (!text) return null;
+  if (/(只听我的歌单|只放我的歌单|不要外部推荐|关闭外部推荐)/.test(text)) {
+    return { mode: 'localOnly', reply: '好，接下来只从你的歌单里安排。' };
+  }
+  if (/(保守一点|少一点新歌|少推荐外面的|外部推荐少一点)/.test(text)) {
+    return { mode: 'conservative', reply: '好，我会保守一点，主要放你的歌单。' };
+  }
+  if (/(多发现新歌|多推荐新歌|探索多一点|外部推荐多一点)/.test(text)) {
+    return { mode: 'discovery', reply: '好，我会多放一点外部发现，但还是贴着你的口味。' };
+  }
+  if (/(恢复默认推荐|正常推荐|平衡推荐)/.test(text)) {
+    return { mode: 'balanced', reply: '好，恢复默认的推荐探索比例。' };
+  }
+  return null;
+}
+
+const BAD_EXTERNAL_VERSION_RE = /(live|现场|演唱会|伴奏|翻唱|cover|remix|dj|片段|剪辑|铃声|karaoke|纯伴奏)/i;
+
+function isCleanExternalCandidate(track) {
+  const haystack = [
+    track?.name,
+    track?.album?.name,
+    track?.al?.name,
+    track?.alia?.join?.(' ')
+  ].filter(Boolean).join(' ');
+  return !BAD_EXTERNAL_VERSION_RE.test(haystack);
+}
+
 function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio = 0.75, limit = 80, isBlocked = () => false } = {}) {
   const seen = new Set();
   const locals = uniqueTracks(localPool, isBlocked, seen);
   const externals = uniqueTracks(externalPool, isBlocked, seen);
-  const localSlots = Math.max(1, Math.round(localRatio * 4));
-  const externalSlots = Math.max(1, 4 - localSlots);
+  const ratio = Math.min(1, Math.max(0, Number(localRatio)));
+  const localSlots = ratio <= 0 ? 0 : Math.max(1, Math.round(ratio * 4));
+  const externalSlots = ratio >= 1 ? 0 : Math.max(1, 4 - localSlots);
   const mixed = [];
   let localIndex = 0;
   let externalIndex = 0;
@@ -94,12 +142,12 @@ async function buildExternalRecommendationPool({ music, qqmusic, tasteSignals = 
     if (candidates.length >= limit) break;
     try {
       const found = await music.searchSongs(seed.query, 6);
-      candidates.push(...(found || []).map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean));
+      candidates.push(...(found || []).map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean).filter(isCleanExternalCandidate));
     } catch {}
     if (candidates.length < limit && qqmusic?.isEnabled?.()) {
       try {
         const found = await qqmusic.searchSongs(seed.query, 4);
-        candidates.push(...(found || []).map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean));
+        candidates.push(...(found || []).map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean).filter(isCleanExternalCandidate));
       } catch {}
     }
   }
@@ -109,5 +157,9 @@ async function buildExternalRecommendationPool({ music, qqmusic, tasteSignals = 
 module.exports = {
   mixRecommendationQueue,
   buildExternalRecommendationPool,
-  querySeeds
+  querySeeds,
+  resolveExternalRecommendationRatio,
+  ratioForExplorationMode,
+  parseExplorationCommand,
+  isCleanExternalCandidate
 };
