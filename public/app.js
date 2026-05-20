@@ -54,6 +54,7 @@
   const btnTts    = $('btn-tts');
   const btnLyric  = $('btn-lyric');
   const btnHistory= $('btn-history');
+  const btnHistoryFab = $('btn-history-fab');
   const btnTaste  = $('btn-taste');
   const lyricOv   = $('lyric-overlay');
   const lyricScroll = $('lyric-scroll');
@@ -788,6 +789,10 @@
     await openHistory();
   };
 
+  if (btnHistoryFab) {
+    btnHistoryFab.onclick = btnHistory.onclick;
+  }
+
   historyClose.onclick = closeHistory;
   historyOv.onclick = (e) => {
     if (e.target === historyOv) closeHistory();
@@ -802,6 +807,7 @@
     historyOv.classList.add('open');
     historyOv.setAttribute('aria-hidden', 'false');
     btnHistory.classList.add('active');
+    if (btnHistoryFab) btnHistoryFab.classList.add('active');
     historyStats.innerHTML = '<div class="history-stat"><span>LOADING</span><strong>...</strong></div>';
     historyArtists.innerHTML = '<p class="history-empty">正在读取播放历史...</p>';
     historyCategories.innerHTML = '';
@@ -823,6 +829,7 @@
     historyOv.classList.remove('open');
     historyOv.setAttribute('aria-hidden', 'true');
     btnHistory.classList.remove('active');
+    if (btnHistoryFab) btnHistoryFab.classList.remove('active');
   }
 
   // ─── Import playlists + Generate Taste ────────────────────────────────────
