@@ -21,6 +21,33 @@ const circuit = {
 };
 const urlCache = new Map();
 const unavailableCache = new Map();
+const recentUrlAttempts = [];
+
+const QQ_QUALITY_FALLBACKS = [
+  { quality: 'M800', ext: 'mp3' },
+  { quality: 'M500', ext: 'mp3' },
+  { quality: 'C400', ext: 'm4a' },
+  { quality: 'M128', ext: 'mp3' },
+  { quality: 'C128', ext: 'm4a' }
+];
+
+function summarizeQualityAttempts(attempts = []) {
+  return attempts
+    .filter(item => item?.quality)
+    .map(item => `${item.quality}: ${item.reason || 'unknown'}`)
+    .join('; ');
+}
+
+function rememberUrlAttempt(songmid, attempts, result = 'failed') {
+  recentUrlAttempts.unshift({
+    at: new Date().toISOString(),
+    songmid,
+    result,
+    summary: summarizeQualityAttempts(attempts),
+    attempts: attempts.map(item => ({ ...item }))
+  });
+  if (recentUrlAttempts.length > 20) recentUrlAttempts.length = 20;
+}
 
 function circuitRemainingMs() {
   return Math.max(0, circuit.openUntil - Date.now());
@@ -53,7 +80,14 @@ function getCircuitState() {
     remainingMs: circuitRemainingMs(),
     lastReason: circuit.lastReason,
     threshold: QQ_CIRCUIT_THRESHOLD,
-    cooldownMs: QQ_CIRCUIT_COOLDOWN_MS
+    cooldownMs: QQ_CIRCUIT_COOLDOWN_MS,
+    recentUrlAttempts: recentUrlAttempts.slice(0, 10),
+    unavailable: Array.from(unavailableCache.entries()).map(([songmid, entry]) => ({
+      songmid,
+      reason: entry.reason,
+      attempts: entry.attempts || [],
+      expiresAt: entry.expiresAt
+    }))
   };
 }
 
@@ -185,10 +219,11 @@ async function getSongUrl(songmid) {
   const uin = extractUin(QQ_COOKIE);
   const g   = guid();
   let lastError = '';
+  const qualityAttempts = [];
 
   // Try formats in order; probe CDN before returning to avoid silent 404s
   // M800/M500 = 超级会员; C400 = 绿钻可能可用; M128/C128 = 普通会员可用
-  for (const [quality, ext] of [['M800', 'mp3'], ['M500', 'mp3'], ['C400', 'm4a'], ['M128', 'mp3'], ['C128', 'm4a']]) {
+  for (const { quality, ext } of QQ_QUALITY_FALLBACKS) {
     const filename = `${quality}${songmid}.${ext}`;
     try {
       const body = {
@@ -218,6 +253,7 @@ async function getSongUrl(songmid) {
       const purl  = info?.midurlinfo?.[0]?.purl;
       if (!purl) {
         lastError = `${quality}: empty purl`;
+        qualityAttempts.push({ quality, reason: 'empty purl' });
         continue;
       }
 
@@ -237,21 +273,28 @@ async function getSongUrl(songmid) {
         console.log(`QQ Music URL 成功 (${quality}): ${url.substring(0, 80)}...`);
         resetCircuit();
         urlCache.set(songmid, { url, expiresAt: Date.now() + QQ_URL_CACHE_MS });
+        qualityAttempts.push({ quality, reason: `CDN HTTP ${probe.status}`, status: probe.status });
+        rememberUrlAttempt(songmid, qualityAttempts, 'success');
         return url;
       }
       lastError = `${quality}: CDN HTTP ${probe.status}`;
+      qualityAttempts.push({ quality, reason: `CDN HTTP ${probe.status}`, status: probe.status });
       if (QQ_DEBUG_URL) console.warn(`QQ Music CDN probe 拒绝 (${quality}): HTTP ${probe.status}`);
     } catch (e) {
       lastError = `${quality}: ${e.message}`;
+      qualityAttempts.push({ quality, reason: e.message });
       if (QQ_DEBUG_URL) console.warn(`QQ Music URL (${quality}) error:`, e.message);
     }
   }
+  const failureSummary = summarizeQualityAttempts(qualityAttempts) || lastError || `all formats failed: ${songmid}`;
   unavailableCache.set(songmid, {
-    reason: lastError || `all formats failed: ${songmid}`,
+    reason: failureSummary,
+    attempts: qualityAttempts,
     expiresAt: Date.now() + QQ_UNAVAILABLE_CACHE_MS
   });
-  console.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${lastError || 'all formats failed'})`);
-  recordCircuitFailure(lastError || `all formats failed: ${songmid}`);
+  rememberUrlAttempt(songmid, qualityAttempts, 'failed');
+  console.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${failureSummary})`);
+  recordCircuitFailure(failureSummary);
   return null;
 }
 
@@ -383,5 +426,7 @@ module.exports = {
   getCircuitState,
   resetCircuit,
   isEnabled: () => !!QQ_COOKIE,
-  extractUin
+  extractUin,
+  QQ_QUALITY_FALLBACKS,
+  summarizeQualityAttempts
 };
