@@ -205,6 +205,18 @@
           <option value="">默认电台</option>
         </select>
       </label>
+      <div class="memory-panel">
+        <div class="memory-head">
+          <span>MEMORY</span>
+          <strong>电台记忆</strong>
+        </div>
+        <div class="memory-actions">
+          <button id="memory-export" type="button">导出记忆</button>
+          <button id="memory-import" type="button">导入记忆</button>
+          <input id="memory-import-file" type="file" accept=".claudio,application/json" hidden>
+        </div>
+        <p id="memory-status" class="memory-status" aria-live="polite"></p>
+      </div>
     </section>
 
     <!-- Footer Nav -->

@@ -1118,6 +1118,68 @@ footer button,
   accent-color: var(--green);
 }
 
+.memory-panel {
+  display: grid;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.memory-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-head span,
+.memory-status {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+}
+
+.memory-head strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.memory-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.memory-actions button {
+  min-width: 0;
+  height: 31px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 5px;
+  background: rgba(255,255,255,.045);
+  color: var(--soft);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .6px;
+}
+
+.memory-actions button:hover {
+  color: #06110d;
+  background: var(--green);
+  border-color: transparent;
+}
+
+.memory-actions button:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
+.memory-status {
+  min-height: 14px;
+  line-height: 1.4;
+}
+
 .command-row {
   display: grid;
   grid-template-columns: 1fr 38px 42px;

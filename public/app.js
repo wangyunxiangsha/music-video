@@ -68,6 +68,10 @@
   const settingRatioValue = $('setting-ratio-value');
   const settingDjPolicy = $('setting-dj-policy');
   const settingScene = $('setting-scene');
+  const memoryExport = $('memory-export');
+  const memoryImport = $('memory-import');
+  const memoryImportFile = $('memory-import-file');
+  const memoryStatus = $('memory-status');
   const lyricOv   = $('lyric-overlay');
   const lyricScroll = $('lyric-scroll');
   const lyricClose  = $('lyric-close');
@@ -360,6 +364,69 @@
     if (data.settings) renderSettingsPanel(data.settings);
     if (data.queue) renderQueue(data.queue);
     return data;
+  }
+
+  function memoryFileName() {
+    const d = new Date();
+    const date = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')
+    ].join('-');
+    return `Claudio电台记忆-${date}.claudio`;
+  }
+
+  function setMemoryStatus(text) {
+    if (memoryStatus) memoryStatus.textContent = text || '';
+  }
+
+  async function downloadRadioMemory() {
+    if (!memoryExport) return;
+    memoryExport.disabled = true;
+    setMemoryStatus('正在准备记忆文件...');
+    try {
+      const res = await fetch('/api/memory/export');
+      if (!res.ok) throw new Error(`export ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = memoryFileName();
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMemoryStatus('记忆文件已导出');
+    } catch {
+      setMemoryStatus('记忆导出失败，稍后再试');
+    } finally {
+      memoryExport.disabled = false;
+    }
+  }
+
+  async function importRadioMemory(file) {
+    if (!file) return;
+    if (!window.confirm('导入后会合并电台偏好，并自动备份当前记忆。继续吗？')) return;
+    setMemoryStatus('正在恢复电台记忆...');
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const res = await fetch('/api/memory/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `import ${res.status}`);
+      const imported = data.imported || {};
+      const skipped = data.skipped || {};
+      setMemoryStatus(`已恢复 ${imported.plays || 0} 条播放、${imported.feedback || 0} 条反馈，跳过 ${skipped.plays || 0} 条重复`);
+      loadSettings();
+    } catch {
+      setMemoryStatus('记忆文件无法导入');
+    } finally {
+      if (memoryImportFile) memoryImportFile.value = '';
+    }
   }
 
   function renderQueueFallback(nextTrack, message = '完整队列需要重启服务后同步') {
@@ -857,6 +924,16 @@
         addBubble('dj', '默认场景暂时没有保存成功。');
       });
     };
+  }
+
+  if (memoryExport) memoryExport.onclick = downloadRadioMemory;
+  if (memoryImport) {
+    memoryImport.onclick = () => {
+      if (memoryImportFile) memoryImportFile.click();
+    };
+  }
+  if (memoryImportFile) {
+    memoryImportFile.onchange = () => importRadioMemory(memoryImportFile.files?.[0]);
   }
 
   function openChat(focus = false) {

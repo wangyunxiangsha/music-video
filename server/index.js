@@ -28,6 +28,7 @@ const playbackDiagnostics = require('./playback-diagnostics');
 const playbackMemory = require('./playback-memory');
 const health = require('./health');
 const tasteProfile = require('./taste-profile');
+const radioMemory = require('./radio-memory');
 const logger = require('./logger');
 
 const app = express();
@@ -42,7 +43,7 @@ const DEFAULT_EXTERNAL_RECOMMEND_RATIO = recommendationMixer.resolveExternalReco
 });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 // Prevent browsers from caching the app shell and JS/CSS so updates take effect immediately
 app.use((req, res, next) => {
   if (
@@ -1123,6 +1124,23 @@ app.patch('/api/settings', async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/memory/export', (req, res) => {
+  const now = new Date();
+  const payload = radioMemory.createMemoryExport({ now });
+  res.setHeader('Content-Type', 'application/vnd.claudio.memory+json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${radioMemory.exportFilename(now)}"`);
+  res.send(JSON.stringify(payload, null, 2));
+});
+
+app.post('/api/memory/import', (req, res) => {
+  try {
+    const result = radioMemory.importMemory(req.body || {});
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
   }
 });
 
