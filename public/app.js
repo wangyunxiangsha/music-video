@@ -72,6 +72,10 @@
   const memoryImport = $('memory-import');
   const memoryImportFile = $('memory-import-file');
   const memoryStatus = $('memory-status');
+  const qqLoginStart = $('qq-login-start');
+  const qqLoginCancel = $('qq-login-cancel');
+  const qqLoginQr = $('qq-login-qr');
+  const qqLoginStatus = $('qq-login-status');
   const lyricOv   = $('lyric-overlay');
   const lyricScroll = $('lyric-scroll');
   const lyricClose  = $('lyric-close');
@@ -426,6 +430,55 @@
       setMemoryStatus('记忆文件无法导入');
     } finally {
       if (memoryImportFile) memoryImportFile.value = '';
+    }
+  }
+
+  function renderQqLoginStatus(data = {}) {
+    if (qqLoginStatus) {
+      const cookie = data.cookie || {};
+      const tokenReady = cookie.qqmusicKey?.present || cookie.qmKeyst?.present;
+      qqLoginStatus.textContent = data.message
+        || (tokenReady ? 'QQ 音乐 Cookie 已配置' : 'QQ 音乐登录未就绪');
+    }
+    if (qqLoginQr) {
+      if (data.qrDataUrl) {
+        qqLoginQr.src = data.qrDataUrl;
+        qqLoginQr.hidden = false;
+      } else {
+        qqLoginQr.removeAttribute('src');
+        qqLoginQr.hidden = true;
+      }
+    }
+    if (qqLoginStart) qqLoginStart.disabled = data.status === 'starting' || data.status === 'waiting_scan';
+  }
+
+  async function refreshQqLoginStatus() {
+    try {
+      const res = await fetch('/api/qq-login/status');
+      renderQqLoginStatus(await res.json());
+    } catch {
+      if (qqLoginStatus) qqLoginStatus.textContent = 'QQ 登录状态暂时不可用';
+    }
+  }
+
+  async function startQqLogin() {
+    if (!qqLoginStart) return;
+    qqLoginStart.disabled = true;
+    if (qqLoginStatus) qqLoginStatus.textContent = '正在生成扫码登录二维码...';
+    try {
+      const res = await fetch('/api/qq-login/start', { method: 'POST' });
+      renderQqLoginStatus(await res.json());
+    } catch {
+      if (qqLoginStatus) qqLoginStatus.textContent = 'QQ 登录助手启动失败';
+    }
+  }
+
+  async function cancelQqLogin() {
+    try {
+      const res = await fetch('/api/qq-login/cancel', { method: 'POST' });
+      renderQqLoginStatus(await res.json());
+    } catch {
+      if (qqLoginStatus) qqLoginStatus.textContent = '取消失败';
     }
   }
 
@@ -934,6 +987,12 @@
   }
   if (memoryImportFile) {
     memoryImportFile.onchange = () => importRadioMemory(memoryImportFile.files?.[0]);
+  }
+  if (qqLoginStart) qqLoginStart.onclick = startQqLogin;
+  if (qqLoginCancel) qqLoginCancel.onclick = cancelQqLogin;
+  if (qqLoginStatus) {
+    refreshQqLoginStatus();
+    setInterval(refreshQqLoginStatus, 5000);
   }
 
   function openChat(focus = false) {

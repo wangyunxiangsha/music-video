@@ -1180,6 +1180,77 @@ footer button,
   line-height: 1.4;
 }
 
+.qq-login-panel {
+  display: grid;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+
+.qq-login-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.qq-login-head span,
+.qq-login-status {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+}
+
+.qq-login-head strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.qq-login-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.qq-login-actions button {
+  min-width: 0;
+  height: 31px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 5px;
+  background: rgba(255,255,255,.045);
+  color: var(--soft);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .6px;
+}
+
+.qq-login-actions button:hover {
+  color: #06110d;
+  background: var(--green);
+  border-color: transparent;
+}
+
+.qq-login-actions button:disabled {
+  cursor: wait;
+  opacity: .62;
+}
+
+.qq-login-qr {
+  width: 148px;
+  height: 148px;
+  padding: 8px;
+  border-radius: 6px;
+  background: white;
+  justify-self: center;
+}
+
+.qq-login-status {
+  min-height: 14px;
+  line-height: 1.4;
+}
+
 .command-row {
   display: grid;
   grid-template-columns: 1fr 38px 42px;

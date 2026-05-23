@@ -2,7 +2,6 @@ require('dotenv').config();
 const axios = require('axios');
 const logger = require('./logger');
 
-const QQ_COOKIE = process.env.QQ_MUSIC_COOKIE || '';
 const QQ_CIRCUIT_THRESHOLD = Number(process.env.QQ_CIRCUIT_THRESHOLD || 3);
 const QQ_CIRCUIT_COOLDOWN_MS = Number(process.env.QQ_CIRCUIT_COOLDOWN_MS || 10 * 60 * 1000);
 const QQ_URL_CACHE_MS = Number(process.env.QQ_URL_CACHE_MS || 5 * 60 * 1000);
@@ -14,6 +13,10 @@ const HEADERS = {
   'Referer': 'https://y.qq.com',
   'Origin': 'https://y.qq.com'
 };
+
+function getQQCookie() {
+  return process.env.QQ_MUSIC_COOKIE || '';
+}
 
 const circuit = {
   failures: 0,
@@ -138,10 +141,11 @@ function buildQQFilename(songmid, mediaMid, quality, ext) {
 
 // ─── Search ────────────────────────────────────────────────────────────────────
 async function searchSongs(keywords, limit = 10) {
+  const cookie = getQQCookie();
   try {
     // Use the newer search API
     const body = {
-      comm: { ct: 19, cv: 1859, uin: extractUin(QQ_COOKIE) },
+      comm: { ct: 19, cv: 1859, uin: extractUin(cookie) },
       req: {
         method: 'DoSearchForQQMusicDesktop',
         module: 'ns.UserActionInterface',
@@ -157,7 +161,7 @@ async function searchSongs(keywords, limit = 10) {
     const res = await axios.post(
       'https://u.y.qq.com/cgi-bin/musicu.fcg',
       body,
-      { headers: { ...HEADERS, Cookie: QQ_COOKIE }, timeout: 8000 }
+      { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 }
     );
 
     const list = res.data?.req?.data?.body?.song?.list || [];
@@ -220,7 +224,8 @@ function formatSong(s) {
 
 // ─── Song URL ──────────────────────────────────────────────────────────────────
 async function getSongUrl(songmid, mediaMid = '') {
-  if (!QQ_COOKIE) {
+  const cookie = getQQCookie();
+  if (!cookie) {
     logger.warn('QQ_MUSIC_COOKIE 未配置，无法获取 QQ 音乐链接');
     return null;
   }
@@ -233,7 +238,7 @@ async function getSongUrl(songmid, mediaMid = '') {
     return null;
   }
 
-  const uin = extractUin(QQ_COOKIE);
+  const uin = extractUin(cookie);
   const g   = guid();
   let lastError = '';
   const qualityAttempts = [];
@@ -263,7 +268,7 @@ async function getSongUrl(songmid, mediaMid = '') {
       const res = await axios.post(
         'https://u.y.qq.com/cgi-bin/musicu.fcg',
         body,
-        { headers: { ...HEADERS, Cookie: QQ_COOKIE }, timeout: 8000 }
+        { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 }
       );
 
       const info  = res.data?.req_0?.data;
@@ -281,7 +286,7 @@ async function getSongUrl(songmid, mediaMid = '') {
 
       // Probe CDN — signed vkeys can be returned even when account lacks access
       const probe = await axios.get(url, {
-        headers: { ...HEADERS, Cookie: QQ_COOKIE, Range: 'bytes=0-0' },
+        headers: { ...HEADERS, Cookie: cookie, Range: 'bytes=0-0' },
         responseType: 'arraybuffer',
         timeout: 5000,
         validateStatus: () => true
@@ -317,10 +322,11 @@ async function getSongUrl(songmid, mediaMid = '') {
 
 // ─── Lyric ─────────────────────────────────────────────────────────────────────
 async function getLyric(songmid) {
+  const cookie = getQQCookie();
   try {
     const res = await axios.get('https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg', {
       params: { songmid, format: 'json', nobase64: 1 },
-      headers: { ...HEADERS, Cookie: QQ_COOKIE },
+      headers: { ...HEADERS, Cookie: cookie },
       timeout: 8000
     });
     const raw = res.data?.lyric || '';
@@ -333,6 +339,7 @@ async function getLyric(songmid) {
 
 // ─── User Playlists ────────────────────────────────────────────────────────────
 async function getUserPlaylists(uin) {
+  const cookie = getQQCookie();
   try {
     const body = {
       req_0: {
@@ -343,7 +350,7 @@ async function getUserPlaylists(uin) {
       comm: { uin, format: 'json', ct: 24, cv: 0 }
     };
     const res = await axios.post('https://u.y.qq.com/cgi-bin/musicu.fcg', body,
-      { headers: { ...HEADERS, Cookie: QQ_COOKIE }, timeout: 8000 });
+      { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 });
     const disslist = res.data?.req_0?.data?.disslist || [];
     if (disslist.length) return disslist;
   } catch (e) {
@@ -365,13 +372,13 @@ async function getUserPlaylists(uin) {
         platform: 'yqq.json',
         needNewCode: 1,
         uin,
-        g_tk_new_20200303: qqGtk(QQ_COOKIE),
-        g_tk: qqGtk(QQ_COOKIE),
+        g_tk_new_20200303: qqGtk(cookie),
+        g_tk: qqGtk(cookie),
         hostuin: uin,
         sin: 0,
         size: 100
       },
-      headers: { ...HEADERS, Cookie: QQ_COOKIE },
+      headers: { ...HEADERS, Cookie: cookie },
       timeout: 10000
     });
     return res.data?.data?.disslist || [];
@@ -382,6 +389,7 @@ async function getUserPlaylists(uin) {
 }
 
 async function getPlaylistSongs(dissid) {
+  const cookie = getQQCookie();
   const all = [];
   let begin = 0;
   const pageSize = 100;
@@ -393,10 +401,10 @@ async function getPlaylistSongs(dissid) {
           method: 'uniform_get_Dissinfo',
           param: { disstid: dissid, onlysong: 1, num: pageSize, begin, enc_host_uin: '' }
         },
-        comm: { uin: extractUin(QQ_COOKIE), format: 'json', ct: 24, cv: 0 }
+        comm: { uin: extractUin(cookie), format: 'json', ct: 24, cv: 0 }
       };
       const res = await axios.post('https://u.y.qq.com/cgi-bin/musicu.fcg', body,
-        { headers: { ...HEADERS, Cookie: QQ_COOKIE }, timeout: 8000 });
+        { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 });
       const songlist = res.data?.req_0?.data?.songlist || [];
       if (!songlist.length) break;
       all.push(...songlist);
@@ -410,7 +418,7 @@ async function getPlaylistSongs(dissid) {
   if (all.length) return all;
 
   try {
-    const uin = extractUin(QQ_COOKIE);
+    const uin = extractUin(cookie);
     const res = await axios.get('https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg', {
       params: {
         type: 1,
@@ -419,12 +427,12 @@ async function getPlaylistSongs(dissid) {
         onlysong: 0,
         disstid: dissid,
         format: 'json',
-        g_tk: qqGtk(QQ_COOKIE),
+        g_tk: qqGtk(cookie),
         loginUin: uin,
         hostUin: uin
       },
       // This legacy qzone endpoint returns subcode=1 with an Origin header.
-      headers: { 'User-Agent': HEADERS['User-Agent'], Referer: 'https://y.qq.com/', Cookie: QQ_COOKIE },
+      headers: { 'User-Agent': HEADERS['User-Agent'], Referer: 'https://y.qq.com/', Cookie: cookie },
       timeout: 10000
     });
     return res.data?.cdlist?.[0]?.songlist || [];
@@ -442,7 +450,8 @@ module.exports = {
   getPlaylistSongs,
   getCircuitState,
   resetCircuit,
-  isEnabled: () => !!QQ_COOKIE,
+  isEnabled: () => !!getQQCookie(),
+  getQQCookie,
   extractUin,
   mediaMidFromSong,
   buildQQFilename,

@@ -45,6 +45,8 @@ npm start
 
 电台记忆可以在 `SET` 面板导出或导入，备份文件扩展名为 `.claudio`。它包含播放偏好、反馈、近期播放摘要和 `user/taste.md`，不会包含 `.env`、Cookie、API Key 或平台登录信息。
 
+QQ 音乐 Cookie 失效时，可以在 `SET` 面板使用“扫码刷新”。首次使用前需要安装可选 helper：`python -m pip install qqmusic-api-python`。
+
 ### 5. PWA 安装（可选）
 在 Chrome/Edge 地址栏右侧点击安装图标，即可安装到桌面/手机。
 

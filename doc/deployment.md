@@ -44,6 +44,18 @@ npm start
 4. 写入 `.env` 中的 `NETEASE_COOKIE` 或 `QQ_MUSIC_COOKIE`。
 5. 重启服务并访问 `/api/health`、`/api/debug/qq-circuit` 查看状态。
 
+### QQ 音乐扫码刷新
+
+`SET` 面板里的“QQ 音乐登录”可以启动扫码刷新流程。这个功能通过可选的 Python helper 调用 `qqmusic-api-python` 获取新的 `musicid/musickey`，成功后会自动写回 `.env` 的 `QQ_MUSIC_COOKIE`，并立即更新当前 Node 进程里的运行时 Cookie。
+
+首次使用前安装辅助库：
+
+```bash
+python -m pip install qqmusic-api-python
+```
+
+如果界面提示缺少 `qqmusic-api-python`，说明当前环境还没有安装这个 helper。扫码刷新不会导出或显示真实 Cookie，只会在本机更新 `.env`。
+
 ## 日志分级
 
 `LOG_LEVEL` 支持：

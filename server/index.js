@@ -29,6 +29,7 @@ const playbackMemory = require('./playback-memory');
 const health = require('./health');
 const tasteProfile = require('./taste-profile');
 const radioMemory = require('./radio-memory');
+const qqLoginManager = require('./qq-login-manager');
 const logger = require('./logger');
 
 const app = express();
@@ -1142,6 +1143,18 @@ app.post('/api/memory/import', (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
+});
+
+app.get('/api/qq-login/status', (req, res) => {
+  res.json(qqLoginManager.getStatus());
+});
+
+app.post('/api/qq-login/start', (req, res) => {
+  res.json(qqLoginManager.startLogin());
+});
+
+app.post('/api/qq-login/cancel', (req, res) => {
+  res.json(qqLoginManager.cancelLogin());
 });
 
 app.post('/api/chat', async (req, res) => {

@@ -1,0 +1,196 @@
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const ENV_FILE = path.join(__dirname, '../.env');
+const HELPER_SCRIPT = path.join(__dirname, '../scripts/qq-login-helper.py');
+
+let session = null;
+
+function splitCookie(cookie = '') {
+  return String(cookie)
+    .split(';')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const index = item.indexOf('=');
+      return index >= 0 ? [item.slice(0, index), item.slice(index + 1)] : [item, ''];
+    });
+}
+
+function cookieValue(cookie, name) {
+  const found = splitCookie(cookie).find(([key]) => key === name);
+  return found ? found[1] : '';
+}
+
+function parseCookieStatus(cookie = process.env.QQ_MUSIC_COOKIE || '') {
+  const pairs = splitCookie(cookie);
+  const get = (name) => {
+    const value = cookieValue(cookie, name);
+    return { present: Boolean(value), length: value.length };
+  };
+  return {
+    configured: Boolean(cookie),
+    fieldCount: pairs.length,
+    uin: get('uin'),
+    qqmusicKey: get('qqmusic_key'),
+    qmKeyst: get('qm_keyst'),
+    psrfQqOpenid: get('psrf_qqopenid'),
+    psrfQqAccessToken: get('psrf_qqaccess_token'),
+    psrfQqRefreshToken: get('psrf_qqrefresh_token'),
+    psrfQqUnionid: get('psrf_qqunionid'),
+    musicKeyCreatedAt: get('psrf_musickey_createtime'),
+    accessTokenExpiresAt: get('psrf_access_token_expiresAt'),
+    names: pairs.map(([key]) => key)
+  };
+}
+
+function cookieFromCredential(credential = {}) {
+  const musicid = String(credential.musicid || credential.musicId || credential.uin || '').replace(/^o/, '');
+  const musickey = String(credential.musickey || credential.musicKey || credential.qqmusic_key || credential.qm_keyst || '');
+  if (!musicid || !musickey) {
+    throw new Error('QQ login credential missing musicid or musickey');
+  }
+  return [
+    `uin=o${musicid}`,
+    `qqmusic_key=${musickey}`,
+    `qm_keyst=${musickey}`
+  ].join('; ');
+}
+
+function updateEnvCookie(envFile = ENV_FILE, cookie) {
+  if (!cookie) throw new Error('QQ cookie is empty');
+  const line = `QQ_MUSIC_COOKIE=${cookie}`;
+  let text = '';
+  try {
+    text = fs.readFileSync(envFile, 'utf8');
+  } catch {
+    text = '';
+  }
+
+  const lines = text.split(/\r?\n/);
+  const index = lines.findIndex(item => item.startsWith('QQ_MUSIC_COOKIE='));
+  if (index >= 0) {
+    lines[index] = line;
+  } else {
+    if (lines.length && lines[lines.length - 1] !== '') lines.push('');
+    lines.push(line);
+  }
+  fs.writeFileSync(envFile, lines.join('\n').replace(/\n{3,}/g, '\n\n'), 'utf8');
+  process.env.QQ_MUSIC_COOKIE = cookie;
+  return { ok: true, envFile };
+}
+
+function safeSession() {
+  if (!session) {
+    return {
+      active: false,
+      status: 'idle',
+      cookie: parseCookieStatus()
+    };
+  }
+  return {
+    active: Boolean(session.child && !session.done),
+    status: session.status,
+    message: session.message,
+    qrDataUrl: session.qrDataUrl || '',
+    startedAt: session.startedAt,
+    updatedAt: session.updatedAt,
+    cookie: parseCookieStatus()
+  };
+}
+
+function finishSession(status, message) {
+  if (!session) return;
+  session.status = status;
+  session.message = message || '';
+  session.updatedAt = new Date().toISOString();
+  session.done = true;
+}
+
+function handleHelperEvent(event = {}) {
+  if (!session) return;
+  session.updatedAt = new Date().toISOString();
+  if (event.type === 'qr') {
+    session.status = 'waiting_scan';
+    session.qrDataUrl = event.dataUrl || '';
+    session.message = '请用 QQ 音乐或 QQ 扫码登录';
+    return;
+  }
+  if (event.type === 'status') {
+    session.status = event.status || session.status;
+    session.message = event.message || session.message;
+    return;
+  }
+  if (event.type === 'credential') {
+    const cookie = cookieFromCredential(event.credential || event);
+    updateEnvCookie(session.envFile, cookie);
+    finishSession('done', 'QQ 音乐登录已刷新');
+    return;
+  }
+  if (event.type === 'error') {
+    finishSession('error', event.message || 'QQ 登录助手失败');
+  }
+}
+
+function startLogin({ python = process.env.PYTHON || 'python', envFile = ENV_FILE } = {}) {
+  if (session?.child && !session.done) return safeSession();
+
+  session = {
+    child: null,
+    done: false,
+    status: 'starting',
+    message: '正在启动 QQ 登录助手',
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    qrDataUrl: '',
+    envFile
+  };
+
+  const child = spawn(python, [HELPER_SCRIPT], {
+    cwd: path.join(__dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  session.child = child;
+  let buffer = '';
+  child.stdout.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        handleHelperEvent(JSON.parse(line));
+      } catch {
+        handleHelperEvent({ type: 'status', status: 'running', message: line.trim() });
+      }
+    }
+  });
+  child.stderr.on('data', (chunk) => {
+    const message = chunk.toString('utf8').trim();
+    if (message) handleHelperEvent({ type: 'status', status: 'running', message });
+  });
+  child.on('error', (error) => finishSession('error', error.message));
+  child.on('exit', (code) => {
+    if (!session || session.status === 'done' || session.status === 'error') return;
+    finishSession(code === 0 ? 'done' : 'error', code === 0 ? session.message : `QQ 登录助手退出：${code}`);
+  });
+  return safeSession();
+}
+
+function cancelLogin() {
+  if (session?.child && !session.done) {
+    session.child.kill();
+    finishSession('cancelled', '已取消 QQ 登录刷新');
+  }
+  return safeSession();
+}
+
+module.exports = {
+  parseCookieStatus,
+  cookieFromCredential,
+  updateEnvCookie,
+  startLogin,
+  cancelLogin,
+  getStatus: safeSession
+};
