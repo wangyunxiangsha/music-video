@@ -49,7 +49,27 @@ qqLogin.startLogin({
 setTimeout(() => {
   const status = qqLogin.getStatus();
   assert.strictEqual(status.status, 'error');
-  assert.match(status.message, /二维码生成超时/);
+  assert.match(status.message, /QR generation timed out/);
   qqLogin.cancelLogin();
-  console.log('qq login manager tests passed');
+
+  const noisySuccessHelper = path.join(tmp, 'noisy-success-helper.js');
+  fs.writeFileSync(noisySuccessHelper, [
+    'console.log(JSON.stringify({ type: "credential", credential: { musicid: 987654321, musickey: "fresh-key" } }));',
+    'console.error("raise RuntimeError(\'Event loop is closed\')");',
+    'console.error("RuntimeError: Event loop is closed");'
+  ].join('\n'), 'utf8');
+  qqLogin.startLogin({
+    python: process.execPath,
+    helperScript: noisySuccessHelper,
+    qrTimeoutMs: 500,
+    envFile
+  });
+  setTimeout(() => {
+    const done = qqLogin.getStatus();
+    assert.strictEqual(done.status, 'done');
+    assert.strictEqual(done.message, 'QQ Music login refreshed');
+    assert.doesNotMatch(done.message, /Event loop is closed/);
+    assert.match(fs.readFileSync(envFile, 'utf8'), /^QQ_MUSIC_COOKIE=uin=o987654321; qqmusic_key=fresh-key; qm_keyst=fresh-key$/m);
+    console.log('qq login manager tests passed');
+  }, 120);
 }, 120);

@@ -112,28 +112,32 @@ function finishSession(status, message) {
   session.done = true;
 }
 
+function cleanHelperMessage(message = '') {
+  return String(message).trim().slice(0, 500);
+}
+
 function handleHelperEvent(event = {}) {
-  if (!session) return;
+  if (!session || session.done) return;
   session.updatedAt = new Date().toISOString();
   if (event.type === 'qr') {
     session.status = 'waiting_scan';
     session.qrDataUrl = event.dataUrl || '';
-    session.message = '请用 QQ 音乐或 QQ 扫码登录';
+    session.message = 'Scan with QQ Music or QQ';
     return;
   }
   if (event.type === 'status') {
     session.status = event.status || session.status;
-    session.message = event.message || session.message;
+    session.message = cleanHelperMessage(event.message) || session.message;
     return;
   }
   if (event.type === 'credential') {
     const cookie = cookieFromCredential(event.credential || event);
     updateEnvCookie(session.envFile, cookie);
-    finishSession('done', 'QQ 音乐登录已刷新');
+    finishSession('done', 'QQ Music login refreshed');
     return;
   }
   if (event.type === 'error') {
-    finishSession('error', event.message || 'QQ 登录助手失败');
+    finishSession('error', cleanHelperMessage(event.message) || 'QQ login helper failed');
   }
 }
 
@@ -149,7 +153,7 @@ function startLogin({
     child: null,
     done: false,
     status: 'starting',
-    message: '正在启动 QQ 登录助手',
+    message: 'Starting QQ login helper',
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     qrDataUrl: '',
@@ -165,7 +169,7 @@ function startLogin({
   session.timeout = setTimeout(() => {
     if (!session || session.done || session.status !== 'starting') return;
     try { child.kill(); } catch {}
-    finishSession('error', 'QQ 登录二维码生成超时，请检查网络或稍后再试');
+    finishSession('error', 'QQ login QR generation timed out. Check network and try again.');
   }, qrTimeoutMs);
   let buffer = '';
   child.stdout.on('data', (chunk) => {
@@ -182,13 +186,13 @@ function startLogin({
     }
   });
   child.stderr.on('data', (chunk) => {
-    const message = chunk.toString('utf8').trim();
+    const message = cleanHelperMessage(chunk.toString('utf8'));
     if (message) handleHelperEvent({ type: 'status', status: 'running', message });
   });
-  child.on('error', (error) => finishSession('error', error.message));
+  child.on('error', (error) => finishSession('error', cleanHelperMessage(error.message)));
   child.on('exit', (code) => {
     if (!session || session.status === 'done' || session.status === 'error') return;
-    finishSession(code === 0 ? 'done' : 'error', code === 0 ? session.message : `QQ 登录助手退出：${code}`);
+    finishSession(code === 0 ? 'done' : 'error', code === 0 ? session.message : `QQ login helper exited: ${code}`);
   });
   return safeSession();
 }
@@ -196,7 +200,7 @@ function startLogin({
 function cancelLogin() {
   if (session?.child && !session.done) {
     session.child.kill();
-    finishSession('cancelled', '已取消 QQ 登录刷新');
+    finishSession('cancelled', 'QQ login refresh cancelled');
   }
   return safeSession();
 }
