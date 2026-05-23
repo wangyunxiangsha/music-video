@@ -27,6 +27,7 @@ const playability = require('./playability');
 const playbackDiagnostics = require('./playback-diagnostics');
 const playbackMemory = require('./playback-memory');
 const health = require('./health');
+const tasteProfile = require('./taste-profile');
 
 const app = express();
 const server = http.createServer(app);
@@ -869,11 +870,14 @@ app.post('/api/generate-taste', async (req, res) => {
     if (!tasteMd) return res.json({ ok: false, reason: 'AI 生成失败，请检查 DEEPSEEK_API_KEY' });
 
     const tastePath = path.join(__dirname, '../user/taste.md');
-    fs.writeFileSync(tastePath, tasteMd, 'utf8');
+    const savedTaste = tasteProfile.writeTasteMdSafely(tastePath, tasteMd);
+    if (!savedTaste.ok) {
+      return res.json({ ok: false, reason: `生成内容不完整，已保留旧的 taste.md：${savedTaste.reason}` });
+    }
 
     const local = importer.loadLocal();
     const plCount = (local?.netease?.playlists?.length || 0) + (local?.qq?.playlists?.length || 0);
-    res.json({ ok: true, tasteMd, playlistCount: plCount, songCount: tasteData.totalSongs });
+    res.json({ ok: true, tasteMd: savedTaste.tasteMd, playlistCount: plCount, songCount: tasteData.totalSongs });
   } catch (e) {
     res.json({ ok: false, reason: e.message });
   }

@@ -316,6 +316,7 @@ music-video/
 
 ### 自定义音乐品味
 编辑 `user/taste.md`，告诉 AI 你喜欢什么风格的音乐。
+品味档案生成通过 `/api/generate-taste` 完成，服务端会先校验 Markdown 是否包含完整章节和完整结尾；如果 AI 返回半截内容，旧的 `taste.md` 不会覆盖。
 
 ### 自定义作息
 编辑 `user/routines.md`，设置你的时间规律，AI 会在合适的时段推荐合适的音乐。
