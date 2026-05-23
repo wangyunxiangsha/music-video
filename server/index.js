@@ -1278,6 +1278,10 @@ app.get('/api/history', (req, res) => {
   res.json(stats.getHistorySummary(limit));
 });
 
+app.get('/api/listening-report/today', (req, res) => {
+  res.json(stats.getTodayReport());
+});
+
 app.get('/api/taste', (req, res) => {
   const fs = require('fs');
   try {

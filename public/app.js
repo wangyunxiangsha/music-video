@@ -73,6 +73,7 @@
   const lyricClose  = $('lyric-close');
   const historyOv = $('history-overlay');
   const historyClose = $('history-close');
+  const todayReport = $('today-report');
   const historyStats = $('history-stats');
   const historyArtists = $('history-artists');
   const historyCategories = $('history-categories');
@@ -162,6 +163,56 @@
     `).join('');
   }
 
+  function pctLabel(value) {
+    return `${Math.round(Math.max(0, Math.min(1, Number(value) || 0)) * 100)}%`;
+  }
+
+  function topName(items, fallback = '暂无') {
+    const first = Array.isArray(items) ? items.find((item) => item?.name) : null;
+    return first ? `${first.name} ×${first.count || 0}` : fallback;
+  }
+
+  function renderTodayReport(report) {
+    if (!todayReport) return;
+    const data = report || {};
+    if (!data.playCount) {
+      todayReport.innerHTML = `
+        <div class="today-report-head">
+          <span>TODAY</span>
+          <strong>今天还没留下播放记录</strong>
+        </div>
+        <p class="today-report-empty">听几首歌后，这里会汇总今天的常听歌手、类型和推荐命中情况。</p>
+      `;
+      return;
+    }
+    const feedback = data.feedback || {};
+    const metrics = [
+      ['播放', data.playCount || 0],
+      ['去重', data.uniqueSongCount || 0],
+      ['外部推荐', pctLabel(data.externalRatio)],
+      ['跳过', feedback.skipCount || 0]
+    ];
+    todayReport.innerHTML = `
+      <div class="today-report-head">
+        <span>TODAY</span>
+        <strong>今日听歌报告</strong>
+      </div>
+      <div class="today-report-metrics">
+        ${metrics.map(([label, value]) => `
+          <div>
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+          </div>
+        `).join('')}
+      </div>
+      <div class="today-report-notes">
+        <span>歌手 ${escapeHtml(topName(data.topArtists))}</span>
+        <span>类型 ${escapeHtml(topName(data.topCategories))}</span>
+        <span>不对味 ${escapeHtml(feedback.notVibeCount || 0)}</span>
+      </div>
+    `;
+  }
+
   function renderHistoryBars(el, items, emptyText) {
     const list = Array.isArray(items) ? items.filter((item) => item?.name) : [];
     if (!list.length) {
@@ -204,6 +255,7 @@
   }
 
   function renderHistory(data) {
+    renderTodayReport(data?.todayReport);
     renderHistoryStats(data || {});
     renderHistoryBars(historyArtists, data?.topArtists, '暂无歌手统计，播放后会自动积累。');
     renderHistoryBars(historyCategories, data?.topCategories, '暂无类型统计，按类型播放后会逐渐丰富。');

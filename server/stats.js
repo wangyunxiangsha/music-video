@@ -35,6 +35,8 @@ function savePlay(track) {
     category:  track.categoryName || '',
     category_ids: track.categoryIds || [],
     cover_url: track.album?.picUrl || track.al?.picUrl || '',
+    recommendation_source: track.recommendationSource || '',
+    recommendation_reason: track.recommendationReason || '',
     played_at: Math.floor(Date.now() / 1000)
   };
   db.plays.unshift(entry);
@@ -79,8 +81,59 @@ function getHistorySummary(limit = 80) {
     lastPlayedAt,
     topArtists: topBy(plays, 'artist', 8),
     topCategories: topBy(plays, 'category', 8),
+    todayReport: getTodayReport(),
     recent: plays.slice(0, 30)
   };
+}
+
+function startOfLocalDay(date = new Date()) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function localDateKey(date = new Date()) {
+  const d = new Date(date);
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function roundRatio(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function buildTodayReport({ now = new Date(), plays = [], feedback = [] } = {}) {
+  const start = startOfLocalDay(now);
+  const end = start + 24 * 60 * 60;
+  const todayPlays = plays.filter((play) => play.played_at >= start && play.played_at < end);
+  const todayFeedback = feedback.filter((item) => item.created_at >= start && item.created_at < end);
+  const uniqueSongs = new Set(todayPlays.map(p => `${p.song_name}::${p.artist}`).filter(Boolean));
+  const externalCount = todayPlays.filter((play) => play.recommendation_source === 'external').length;
+  return {
+    date: localDateKey(now),
+    playCount: todayPlays.length,
+    uniqueSongCount: uniqueSongs.size,
+    externalCount,
+    externalRatio: todayPlays.length ? roundRatio(externalCount / todayPlays.length) : 0,
+    topArtists: topBy(todayPlays, 'artist', 5),
+    topCategories: topBy(todayPlays, 'category', 5),
+    skippedCategories: topBy(todayFeedback.filter((item) => item.type === 'skip'), 'category', 5),
+    feedback: {
+      skipCount: todayFeedback.filter((item) => item.type === 'skip').length,
+      notVibeCount: todayFeedback.filter((item) => item.type === 'not_vibe').length,
+      likeCount: todayFeedback.filter((item) => item.type === 'like').length,
+      dislikeCount: todayFeedback.filter((item) => item.type === 'dislike').length
+    },
+    recent: todayPlays.slice(0, 12)
+  };
+}
+
+function getTodayReport(now = new Date()) {
+  const db = load();
+  return buildTodayReport({ now, plays: db.plays, feedback: db.feedback });
 }
 
 function normalizeTrackKey(track = {}) {
@@ -192,6 +245,8 @@ module.exports = {
   getRecentPlays,
   getTasteSignals,
   getHistorySummary,
+  getTodayReport,
+  buildTodayReport,
   savePreference,
   getPreference,
   saveFeedback,
