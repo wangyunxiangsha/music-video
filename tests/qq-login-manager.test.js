@@ -36,4 +36,20 @@ fs.writeFileSync(addedEnv, 'LOG_LEVEL=debug\n', 'utf8');
 qqLogin.updateEnvCookie(addedEnv, cookie);
 assert.match(fs.readFileSync(addedEnv, 'utf8'), /^QQ_MUSIC_COOKIE=uin=o123456789;/m);
 
-console.log('qq login manager tests passed');
+const hangingHelper = path.join(tmp, 'hanging-helper.js');
+fs.writeFileSync(hangingHelper, 'setTimeout(() => {}, 5000);\n', 'utf8');
+qqLogin.cancelLogin();
+qqLogin.startLogin({
+  python: process.execPath,
+  helperScript: hangingHelper,
+  qrTimeoutMs: 50,
+  envFile
+});
+
+setTimeout(() => {
+  const status = qqLogin.getStatus();
+  assert.strictEqual(status.status, 'error');
+  assert.match(status.message, /二维码生成超时/);
+  qqLogin.cancelLogin();
+  console.log('qq login manager tests passed');
+}, 120);

@@ -102,6 +102,10 @@ function safeSession() {
 
 function finishSession(status, message) {
   if (!session) return;
+  if (session.timeout) {
+    clearTimeout(session.timeout);
+    session.timeout = null;
+  }
   session.status = status;
   session.message = message || '';
   session.updatedAt = new Date().toISOString();
@@ -133,7 +137,12 @@ function handleHelperEvent(event = {}) {
   }
 }
 
-function startLogin({ python = process.env.PYTHON || 'python', envFile = ENV_FILE } = {}) {
+function startLogin({
+  python = process.env.PYTHON || 'python',
+  envFile = ENV_FILE,
+  helperScript = HELPER_SCRIPT,
+  qrTimeoutMs = Number(process.env.QQ_LOGIN_QR_TIMEOUT_MS || 30000)
+} = {}) {
   if (session?.child && !session.done) return safeSession();
 
   session = {
@@ -144,14 +153,20 @@ function startLogin({ python = process.env.PYTHON || 'python', envFile = ENV_FIL
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     qrDataUrl: '',
-    envFile
+    envFile,
+    timeout: null
   };
 
-  const child = spawn(python, [HELPER_SCRIPT], {
+  const child = spawn(python, [helperScript], {
     cwd: path.join(__dirname, '..'),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   session.child = child;
+  session.timeout = setTimeout(() => {
+    if (!session || session.done || session.status !== 'starting') return;
+    try { child.kill(); } catch {}
+    finishSession('error', 'QQ 登录二维码生成超时，请检查网络或稍后再试');
+  }, qrTimeoutMs);
   let buffer = '';
   child.stdout.on('data', (chunk) => {
     buffer += chunk.toString('utf8');
