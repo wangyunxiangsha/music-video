@@ -8,6 +8,7 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'),
 const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
 const docs = fs.readFileSync(path.join(__dirname, '..', 'doc', 'deployment.md'), 'utf8');
+const helper = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'qq-login-helper.py'), 'utf8');
 
 assert.match(server, /const qqLoginManager\s*=\s*require\('\.\/qq-login-manager'\)/);
 assert.match(server, /app\.get\('\/api\/qq-login\/status'/);
@@ -31,5 +32,8 @@ assert.match(css, /\.qq-login-qr/);
 
 assert.match(docs, /QQ 音乐扫码刷新/);
 assert.match(docs, /qqmusic-api-python/);
+
+assert.match(helper, /ensure_ascii=True/);
+assert.doesNotMatch(helper, /ensure_ascii=False/);
 
 console.log('qq login ui tests passed');

@@ -5,7 +5,7 @@ import sys
 
 
 def emit(payload):
-    print(json.dumps(payload, ensure_ascii=False), flush=True)
+    print(json.dumps(payload, ensure_ascii=True), flush=True)
 
 
 async def main():
