@@ -35,5 +35,8 @@ assert.match(docs, /qqmusic-api-python/);
 
 assert.match(helper, /ensure_ascii=True/);
 assert.doesNotMatch(helper, /ensure_ascii=False/);
+assert.match(helper, /client = Client\(\)/);
+assert.match(helper, /safe_close/);
+assert.doesNotMatch(helper, /async with Client/);
 
 console.log('qq login ui tests passed');
