@@ -1,5 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
+const logger = require('./logger');
 
 const AMAP_KEY = process.env.AMAP_WEATHER_KEY || '';
 const AMAP_CITY = process.env.AMAP_WEATHER_CITY || '320100';
@@ -63,14 +64,14 @@ async function getWeatherText() {
     const amapText = await getAmapWeatherText();
     if (amapText) return setCache(amapText);
   } catch (e) {
-    console.warn('Amap weather fetch error:', e.message);
+    logger.warn('Amap weather fetch error:', e.message);
   }
 
   try {
     const openWeatherText = await getOpenWeatherText();
     if (openWeatherText) return setCache(openWeatherText);
   } catch (e) {
-    console.warn('OpenWeather fetch error:', e.message);
+    logger.warn('OpenWeather fetch error:', e.message);
   }
 
   return '';

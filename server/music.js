@@ -2,6 +2,7 @@ require('dotenv').config();
 const { spawn } = require('child_process');
 const axios = require('axios');
 const path = require('path');
+const logger = require('./logger');
 
 const NCM_PORT      = process.env.NCM_PORT || 3001;
 const NCM_BASE      = `http://127.0.0.1:${NCM_PORT}`;
@@ -35,7 +36,7 @@ async function startServer() {
   });
 
   process.on('exit', () => { if (neteaseProcess) neteaseProcess.kill(); });
-  console.log(`✓ NeteaseCloudMusicApi on port ${NCM_PORT}`);
+  logger.info(`✓ NeteaseCloudMusicApi on port ${NCM_PORT}`);
 }
 
 async function ncmGet(endpoint, params = {}) {
@@ -48,7 +49,7 @@ async function ncmGet(endpoint, params = {}) {
     });
     return res.data;
   } catch (e) {
-    console.warn(`NCM [${endpoint}] error:`, e.message);
+    logger.warn(`NCM [${endpoint}] error:`, e.message);
     return null;
   }
 }

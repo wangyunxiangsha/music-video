@@ -1,5 +1,6 @@
 require('dotenv').config();
 const axios = require('axios');
+const logger = require('./logger');
 
 const QQ_COOKIE = process.env.QQ_MUSIC_COOKIE || '';
 const QQ_CIRCUIT_THRESHOLD = Number(process.env.QQ_CIRCUIT_THRESHOLD || 3);
@@ -68,7 +69,7 @@ function recordCircuitFailure(reason) {
   circuit.lastReason = reason || 'unknown';
   if (circuit.failures >= QQ_CIRCUIT_THRESHOLD) {
     circuit.openUntil = Date.now() + QQ_CIRCUIT_COOLDOWN_MS;
-    console.warn(`QQ Music circuit breaker opened for ${Math.round(QQ_CIRCUIT_COOLDOWN_MS / 1000)}s: ${circuit.lastReason}`);
+    logger.warn(`QQ Music circuit breaker opened for ${Math.round(QQ_CIRCUIT_COOLDOWN_MS / 1000)}s: ${circuit.lastReason}`);
   }
 }
 
@@ -195,7 +196,7 @@ async function searchFallback(keywords, limit) {
       privilege: { pl: 1 }
     }));
   } catch (e) {
-    console.warn('QQ Music search fallback error:', e.message);
+    logger.warn('QQ Music search fallback error:', e.message);
     return [];
   }
 }
@@ -220,7 +221,7 @@ function formatSong(s) {
 // ─── Song URL ──────────────────────────────────────────────────────────────────
 async function getSongUrl(songmid, mediaMid = '') {
   if (!QQ_COOKIE) {
-    console.warn('QQ_MUSIC_COOKIE 未配置，无法获取 QQ 音乐链接');
+    logger.warn('QQ_MUSIC_COOKIE 未配置，无法获取 QQ 音乐链接');
     return null;
   }
   const cachedUrl = getCachedEntry(urlCache, songmid);
@@ -228,7 +229,7 @@ async function getSongUrl(songmid, mediaMid = '') {
   const unavailable = getCachedEntry(unavailableCache, songmid);
   if (unavailable) return null;
   if (isCircuitOpen()) {
-    console.warn(`QQ Music circuit breaker active, skip URL probe (${Math.ceil(circuitRemainingMs() / 1000)}s left)`);
+    logger.warn(`QQ Music circuit breaker active, skip URL probe (${Math.ceil(circuitRemainingMs() / 1000)}s left)`);
     return null;
   }
 
@@ -286,7 +287,7 @@ async function getSongUrl(songmid, mediaMid = '') {
         validateStatus: () => true
       });
       if (probe.status === 200 || probe.status === 206) {
-        console.log(`QQ Music URL 成功 (${quality}): ${url.substring(0, 80)}...`);
+        logger.debug(`QQ Music URL 成功 (${quality}): ${url.substring(0, 80)}...`);
         resetCircuit();
         urlCache.set(songmid, { url, expiresAt: Date.now() + QQ_URL_CACHE_MS });
         qualityAttempts.push({ quality, reason: `CDN HTTP ${probe.status}`, status: probe.status });
@@ -295,11 +296,11 @@ async function getSongUrl(songmid, mediaMid = '') {
       }
       lastError = `${quality}: CDN HTTP ${probe.status}`;
       qualityAttempts.push({ quality, reason: `CDN HTTP ${probe.status}`, status: probe.status });
-      if (QQ_DEBUG_URL) console.warn(`QQ Music CDN probe 拒绝 (${quality}): HTTP ${probe.status}`);
+      if (QQ_DEBUG_URL) logger.debug(`QQ Music CDN probe 拒绝 (${quality}): HTTP ${probe.status}`);
     } catch (e) {
       lastError = `${quality}: ${e.message}`;
       qualityAttempts.push({ quality, reason: e.message });
-      if (QQ_DEBUG_URL) console.warn(`QQ Music URL (${quality}) error:`, e.message);
+      if (QQ_DEBUG_URL) logger.debug(`QQ Music URL (${quality}) error:`, e.message);
     }
   }
   const failureSummary = summarizeQualityAttempts(qualityAttempts) || lastError || `all formats failed: ${songmid}`;
@@ -309,7 +310,7 @@ async function getSongUrl(songmid, mediaMid = '') {
     expiresAt: Date.now() + QQ_UNAVAILABLE_CACHE_MS
   });
   rememberUrlAttempt(songmid, qualityAttempts, 'failed');
-  console.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${failureSummary})`);
+  logger.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${failureSummary})`);
   recordCircuitFailure(failureSummary);
   return null;
 }
@@ -346,7 +347,7 @@ async function getUserPlaylists(uin) {
     const disslist = res.data?.req_0?.data?.disslist || [];
     if (disslist.length) return disslist;
   } catch (e) {
-    console.warn('QQ getUserPlaylists error:', e.message);
+    logger.warn('QQ getUserPlaylists error:', e.message);
   }
 
   try {
@@ -375,7 +376,7 @@ async function getUserPlaylists(uin) {
     });
     return res.data?.data?.disslist || [];
   } catch (e) {
-    console.warn('QQ getUserCreatedDiss error:', e.message);
+    logger.warn('QQ getUserCreatedDiss error:', e.message);
     return [];
   }
 }
@@ -402,7 +403,7 @@ async function getPlaylistSongs(dissid) {
       if (songlist.length < pageSize) break;
       begin += pageSize;
     } catch (e) {
-      console.warn(`QQ getPlaylistSongs(${dissid}) error:`, e.message);
+      logger.warn(`QQ getPlaylistSongs(${dissid}) error:`, e.message);
       break;
     }
   }
@@ -428,7 +429,7 @@ async function getPlaylistSongs(dissid) {
     });
     return res.data?.cdlist?.[0]?.songlist || [];
   } catch (e) {
-    console.warn(`QQ getPlaylistSongsFallback(${dissid}) error:`, e.message);
+    logger.warn(`QQ getPlaylistSongsFallback(${dissid}) error:`, e.message);
     return [];
   }
 }

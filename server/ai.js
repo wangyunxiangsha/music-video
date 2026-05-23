@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { OpenAI } = require('openai');
+const logger = require('./logger');
 
 let client = null;
 
@@ -70,7 +71,7 @@ async function generateAnnouncement(track, systemPrompt, policy) {
     });
     return limitAnnouncement(response.choices[0].message.content, policy);
   } catch (e) {
-    console.warn('AI announcement error:', e.message);
+    logger.warn('AI announcement error:', e.message);
     return limitAnnouncement(fallbackAnnouncement(track), policy);
   }
 }
@@ -98,7 +99,7 @@ async function chat(message, history, systemPrompt) {
     });
     return response.choices[0].message.content.trim();
   } catch (e) {
-    console.warn('AI chat error:', e.message);
+    logger.warn('AI chat error:', e.message);
     return '信号有点弱，稍后再试~';
   }
 }
@@ -135,7 +136,7 @@ async function generateTasteMd({ playlistNames, artists, sampleSongs }) {
     });
     return response.choices[0].message.content.trim();
   } catch (e) {
-    console.warn('generateTasteMd error:', e.message);
+    logger.warn('generateTasteMd error:', e.message);
     return null;
   }
 }
@@ -185,7 +186,7 @@ ${input.routinesText || '暂无'}
     const text = response.choices[0].message.content.trim();
     return text || fallbackDailyBriefing(input);
   } catch (e) {
-    console.warn('generateDailyBriefing error:', e.message);
+    logger.warn('generateDailyBriefing error:', e.message);
     return fallbackDailyBriefing(input);
   }
 }

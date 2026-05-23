@@ -28,6 +28,7 @@ const playbackDiagnostics = require('./playback-diagnostics');
 const playbackMemory = require('./playback-memory');
 const health = require('./health');
 const tasteProfile = require('./taste-profile');
+const logger = require('./logger');
 
 const app = express();
 const server = http.createServer(app);
@@ -196,12 +197,12 @@ function trackForPlaybackId(id) {
 async function handlePlaybackFailure(event = {}) {
   playbackMemory.recordFailure(event);
   const result = playbackDiagnostics.recordFailure(event);
-  console.warn(
+  logger.warn(
     `播放失败记录: stage=${event.stage || 'unknown'}, reason=${event.reason || 'unknown'}, `
     + `count=${result.consecutiveFailures}/${playbackDiagnostics.snapshot().rebuildThreshold}`
   );
   if (result.shouldRebuild) {
-    console.warn('连续播放失败达到阈值，正在重建后续队列');
+    logger.warn('连续播放失败达到阈值，正在重建后续队列');
     await rebuildUpcomingQueue();
     playbackDiagnostics.recordRebuild(event.reason || 'consecutive_failures');
     broadcastQueue();
@@ -228,7 +229,7 @@ wss.on('connection', (ws) => {
 
 wss.on('error', (err) => {
   if (err.code !== 'EADDRINUSE') {
-    console.warn('WebSocket error:', err.message);
+    logger.warn('WebSocket error:', err.message);
   }
 });
 
@@ -392,7 +393,7 @@ async function findRequestedSong(songName) {
 
   // ── 2. Fall back to QQ Music (needs SVIP for most songs) ────────────────────
   if (qqmusic.isEnabled()) {
-    console.log(`网易云未找到，尝试 QQ 音乐: ${query}`);
+    logger.info(`网易云未找到，尝试 QQ 音乐: ${query}`);
     const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
     const qqClean    = recommendationMixer.preferCleanVersions(qqResults);
     const qqArtistMatched = recommendationMixer.preferArtistMatches(qqClean, artist);
@@ -480,7 +481,7 @@ async function buildDefaultQueuePool() {
     const pool = importer.buildPlaylistPool();
     if (pool.length > 0) return buildSmartQueue(pool, { limit: 120 });
   } catch (e) {
-    console.warn('队列重建读取本地歌单失败:', e.message);
+    logger.warn('队列重建读取本地歌单失败:', e.message);
   }
   return [...MOCK_PLAYLIST];
 }
@@ -595,7 +596,7 @@ async function loadUserPlaylistsIntoPool() {
   const userPlaylists = await music.getUserPlaylists(uid);
   if (!userPlaylists.length) return [];
 
-  console.log(`✓ 获取到 ${userPlaylists.length} 个歌单，开始加载曲目…`);
+  logger.info(`✓ 获取到 ${userPlaylists.length} 个歌单，开始加载曲目…`);
 
   // Fetch tracks concurrently (3 at a time to avoid rate limiting)
   const allTracks = [];
@@ -634,11 +635,11 @@ async function loadPlaylist() {
     const pool = importer.buildPlaylistPool();
     if (pool.length > 0) {
       playlist = await buildSmartQueue(pool, { limit: 120 });
-      console.log(`✓ 加载智能队列 ${playlist.length} 首（外部推荐 ${Math.round(currentExternalRecommendationRatio() * 100)}%）`);
+      logger.info(`✓ 加载智能队列 ${playlist.length} 首（外部推荐 ${Math.round(currentExternalRecommendationRatio() * 100)}%）`);
       return;
     }
   } catch (e) {
-    console.warn('本地歌单加载失败:', e.message);
+    logger.warn('本地歌单加载失败:', e.message);
   }
 
   // 2. Live fetch from Netease user playlists
@@ -646,11 +647,11 @@ async function loadPlaylist() {
     const userTracks = await loadUserPlaylistsIntoPool();
     if (userTracks.length > 0) {
       playlist = await buildSmartQueue(userTracks, { limit: 120 });
-      console.log(`✓ 用户歌单加载完成，共 ${playlist.length} 首`);
+      logger.info(`✓ 用户歌单加载完成，共 ${playlist.length} 首`);
       return;
     }
   } catch (e) {
-    console.warn('用户歌单加载失败，降级到热门榜:', e.message);
+    logger.warn('用户歌单加载失败，降级到热门榜:', e.message);
   }
 
   // 3. Fallback to Netease top songs
@@ -659,11 +660,11 @@ async function loadPlaylist() {
     if (songs.length > 0) {
       const playable = songs.filter(isPlayable);
       playlist = (playable.length > 5 ? playable : songs).slice(0, 50);
-      console.log(`✓ 加载了 ${playlist.length} 首热门歌曲`);
+      logger.info(`✓ 加载了 ${playlist.length} 首热门歌曲`);
       return;
     }
   } catch (e) {
-    console.warn('热门榜加载失败，使用 mock 数据:', e.message);
+    logger.warn('热门榜加载失败，使用 mock 数据:', e.message);
   }
   playlist = [...MOCK_PLAYLIST];
 }
@@ -672,7 +673,7 @@ async function nextTrack() {
   if (playlist.length === 0) {
     await loadPlaylist();
   } else if (playlist.length < 5) {
-    loadPlaylist().catch(console.error);
+    loadPlaylist().catch(logger.error);
   }
   if (playlist.length === 0) {
     playlist = [...MOCK_PLAYLIST];
@@ -687,7 +688,7 @@ async function nextTrack() {
   });
   playlist = picked.remaining;
   if (picked.skipped.length) {
-    console.warn(`跳过 ${picked.skipped.length} 首暂不可播放的候选，继续寻找下一首`);
+    logger.warn(`跳过 ${picked.skipped.length} 首暂不可播放的候选，继续寻找下一首`);
   }
   currentTrack = picked.track || playlist.shift();
   if (!currentTrack) return;
@@ -1047,14 +1048,14 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
 
     const upstream = response.data;
     upstream.on('error', (streamError) => {
-      console.warn('Audio upstream stream error:', streamError.message);
+      logger.warn('Audio upstream stream error:', streamError.message);
       handlePlaybackFailure({
         stage: 'stream',
         reason: 'upstream_stream_error',
         detail: streamError.message,
         hasRange: Boolean(req.headers.range),
         track
-      }).catch((failureError) => console.warn('Playback failure handler error:', failureError.message));
+      }).catch((failureError) => logger.warn('Playback failure handler error:', failureError.message));
       if (!res.headersSent) {
         res.status(502).json({ error: '音频源连接中断' });
       } else {
@@ -1066,7 +1067,7 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
     });
     upstream.pipe(res);
   } catch (e) {
-    console.error('Audio stream error:', e.message, e.response?.status);
+    logger.error('Audio stream error:', e.message, e.response?.status);
     await handlePlaybackFailure({
       stage: 'stream',
       reason: e.response?.status ? 'upstream_http_error' : 'stream_request_error',
@@ -1275,7 +1276,7 @@ app.get('/api/tts', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.end(mp3);
   } catch (e) {
-    console.warn('Edge TTS error:', e.message);
+    logger.warn('Edge TTS error:', e.message);
     res.status(503).end();
   }
 });
@@ -1338,26 +1339,26 @@ async function listenWithFallback(startPort) {
       if (err.code !== 'EADDRINUSE' || offset === PORT_RETRY_LIMIT) {
         throw err;
       }
-      console.warn(`⚠  端口 ${port} 已被占用，尝试 ${port + 1}...`);
+      logger.warn(`⚠  端口 ${port} 已被占用，尝试 ${port + 1}...`);
     }
   }
   return startPort;
 }
 
 async function start() {
-  console.log('\n🎙️  Claudio FM 正在启动...\n');
+  logger.info('\n🎙️  Claudio FM 正在启动...\n');
   const startupSelfCheck = health.runStartupSelfCheck({
     env: process.env,
     qqEnabled: qqmusic.isEnabled()
   });
   if (startupSelfCheck.warnings.length) {
-    console.warn(startupSelfCheck.summary);
+    logger.warn(startupSelfCheck.summary);
   }
 
   try {
     await music.startServer();
   } catch (e) {
-    console.warn('⚠  NeteaseCloudMusicApi 启动失败，将使用 mock 数据');
+    logger.warn('⚠  NeteaseCloudMusicApi 启动失败，将使用 mock 数据');
   }
 
   await loadPlaylist();
@@ -1366,12 +1367,12 @@ async function start() {
 
   const actualPort = await listenWithFallback(PORT);
   activePort = actualPort;
-  console.log(`\n✅ Claudio FM 已启动！`);
-  console.log(`   本地访问：http://localhost:${actualPort}`);
+  logger.info(`\n✅ Claudio FM 已启动！`);
+  logger.info(`   本地访问：http://localhost:${actualPort}`);
   if (actualPort !== PORT) {
-    console.log(`   提示：.env 里的 PORT=${PORT} 已被占用，本次自动切换到 ${actualPort}`);
+    logger.info(`   提示：.env 里的 PORT=${PORT} 已被占用，本次自动切换到 ${actualPort}`);
   }
-  console.log(`   PWA 安装：通过浏览器地址栏安装图标\n`);
+  logger.info(`   PWA 安装：通过浏览器地址栏安装图标\n`);
 }
 
-start().catch(console.error);
+start().catch(logger.error);

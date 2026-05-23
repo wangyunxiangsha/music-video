@@ -41,6 +41,8 @@ npm start
 
 如果 8080 已被占用，服务会自动尝试 8081、8082 等后续端口；以控制台打印的“本地访问”地址为准。
 
+部署、PWA 缓存刷新、Cookie 更新和日志分级说明见 [doc/deployment.md](doc/deployment.md)。
+
 ### 5. PWA 安装（可选）
 在 Chrome/Edge 地址栏右侧点击安装图标，即可安装到桌面/手机。
 
