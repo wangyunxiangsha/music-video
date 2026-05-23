@@ -413,6 +413,7 @@ npm run classify
 | GET | /api/daily-briefing | 查看当前每日 / 时段电台简报 |
 | GET | /api/history | 播放历史摘要：今日报告、记录数、常听歌手、常听类型、最近播放 |
 | GET | /api/listening-report/today | 今日听歌报告：播放数、去重、外部推荐占比、反馈统计 |
+| GET | /api/health | 健康检查：服务端口、配置自检、音乐源状态、QQ circuit、播放失败诊断 |
 | POST | /api/import-playlists | 导入网易云和 QQ 音乐歌单 |
 | POST | /api/generate-taste | 根据歌单生成用户音乐品味档案 |
 | WS | /stream | 实时状态推送 |

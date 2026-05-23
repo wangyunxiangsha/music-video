@@ -26,6 +26,7 @@ const recommendationExplainer = require('./recommendation-explainer');
 const playability = require('./playability');
 const playbackDiagnostics = require('./playback-diagnostics');
 const playbackMemory = require('./playback-memory');
+const health = require('./health');
 
 const app = express();
 const server = http.createServer(app);
@@ -33,6 +34,7 @@ const wss = new WebSocketServer({ server, path: '/stream' });
 
 const PORT = Number(process.env.PORT || 8080);
 const PORT_RETRY_LIMIT = Number(process.env.PORT_RETRY_LIMIT || 10);
+const startedAt = new Date().toISOString();
 const DEFAULT_EXTERNAL_RECOMMEND_RATIO = recommendationMixer.resolveExternalRecommendationRatio({
   env: process.env
 });
@@ -67,6 +69,7 @@ let dailyBriefing = null;
 let activeExplorationMode = stats.getPreference('explorationMode', 'balanced');
 let activeExternalRecommendRatio = stats.getPreference('externalRecommendRatio', DEFAULT_EXTERNAL_RECOMMEND_RATIO);
 let activeExternalRecommendEnabled = stats.getPreference('externalRecommendEnabled', true) !== false;
+let activePort = null;
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -1282,6 +1285,18 @@ app.get('/api/listening-report/today', (req, res) => {
   res.json(stats.getTodayReport());
 });
 
+app.get('/api/health', (req, res) => {
+  res.json(health.buildHealthSnapshot({
+    port: activePort,
+    startedAt,
+    env: process.env,
+    qqCircuit: qqmusic.getCircuitState(),
+    playbackDiagnostics: playbackDiagnostics.snapshot(),
+    playbackMemory: playbackMemory.snapshot(),
+    weather: weatherText
+  }));
+});
+
 app.get('/api/taste', (req, res) => {
   const fs = require('fs');
   try {
@@ -1327,6 +1342,13 @@ async function listenWithFallback(startPort) {
 
 async function start() {
   console.log('\n🎙️  Claudio FM 正在启动...\n');
+  const startupSelfCheck = health.runStartupSelfCheck({
+    env: process.env,
+    qqEnabled: qqmusic.isEnabled()
+  });
+  if (startupSelfCheck.warnings.length) {
+    console.warn(startupSelfCheck.summary);
+  }
 
   try {
     await music.startServer();
@@ -1339,6 +1361,7 @@ async function start() {
   await ensureDailyBriefing();
 
   const actualPort = await listenWithFallback(PORT);
+  activePort = actualPort;
   console.log(`\n✅ Claudio FM 已启动！`);
   console.log(`   本地访问：http://localhost:${actualPort}`);
   if (actualPort !== PORT) {
