@@ -48,6 +48,43 @@ function uniqueTracks(items, isBlocked = () => false, seen = new Set()) {
   return result;
 }
 
+function spreadByArtist(items = []) {
+  const groups = new Map();
+  const order = [];
+  for (const item of items) {
+    const artist = artistOf(item) || `track:${item?.id || order.length}`;
+    if (!groups.has(artist)) {
+      groups.set(artist, []);
+      order.push(artist);
+    }
+    groups.get(artist).push(item);
+  }
+
+  const result = [];
+  let added = true;
+  while (added) {
+    added = false;
+    for (const artist of order) {
+      const group = groups.get(artist);
+      if (!group?.length) continue;
+      result.push(group.shift());
+      added = true;
+    }
+  }
+  return result;
+}
+
+function weightedShuffle(items = [], weightOf = () => 1, random = Math.random) {
+  return [...items]
+    .map((item, index) => {
+      const weight = Math.max(0.1, Number(weightOf(item)) || 1);
+      const roll = Math.max(Number.EPSILON, Math.min(1 - Number.EPSILON, random()));
+      return { item, index, key: Math.log(roll) / weight };
+    })
+    .sort((a, b) => b.key - a.key || a.index - b.index)
+    .map(entry => entry.item);
+}
+
 function withRecommendationReason(track, source) {
   if (!track) return track;
   if (track.recommendationReason) return track;
@@ -124,8 +161,8 @@ function preferOriginalArtist(items = [], songName = '') {
 
 function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio = 0.75, limit = 80, isBlocked = () => false } = {}) {
   const seen = new Set();
-  const locals = uniqueTracks(localPool, isBlocked, seen);
-  const externals = uniqueTracks(externalPool, isBlocked, seen);
+  const locals = spreadByArtist(uniqueTracks(localPool, isBlocked, seen));
+  const externals = spreadByArtist(uniqueTracks(externalPool, isBlocked, seen));
   const ratio = Math.min(1, Math.max(0, Number(localRatio)));
   const localSlots = ratio <= 0 ? 0 : Math.max(1, Math.round(ratio * 4));
   const externalSlots = ratio >= 1 ? 0 : Math.max(1, 4 - localSlots);
@@ -157,15 +194,15 @@ function mixRecommendationQueue({ localPool = [], externalPool = [], localRatio 
 
 function querySeeds({ tasteSignals = {}, scene = null, slot = null } = {}) {
   const seeds = [];
-  for (const item of tasteSignals.topArtists || []) {
-    if (item?.name) seeds.push({ query: `${item.name} 热门`, reason: item.name });
-  }
   for (const item of tasteSignals.topCategories || []) {
     if (item?.name) seeds.push({ query: `${item.name} 推荐`, reason: item.name });
   }
   if (scene?.name) seeds.push({ query: `${scene.name} 音乐`, reason: scene.name });
   const slotLabel = slot?.slotLabel || slot?.label;
   if (slotLabel) seeds.push({ query: `${slotLabel} 音乐`, reason: slotLabel });
+  for (const item of tasteSignals.topArtists || []) {
+    if (item?.name) seeds.push({ query: `${item.name} 相似推荐`, reason: item.name });
+  }
 
   const seen = new Set();
   return seeds.filter(seed => {
@@ -205,13 +242,14 @@ async function buildExternalRecommendationPool({ music, qqmusic, tasteSignals = 
       } catch {}
     }
   }
-  return uniqueTracks(candidates, isBlocked).slice(0, limit);
+  return spreadByArtist(uniqueTracks(candidates, isBlocked)).slice(0, limit);
 }
 
 module.exports = {
   mixRecommendationQueue,
   buildExternalRecommendationPool,
   querySeeds,
+  weightedShuffle,
   resolveExternalRecommendationRatio,
   ratioForExplorationMode,
   parseExplorationCommand,

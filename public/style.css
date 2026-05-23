@@ -500,6 +500,16 @@ footer {
   text-overflow: ellipsis;
 }
 
+.song-reason {
+  margin-top: 4px;
+  color: rgba(126, 255, 181, .72);
+  font-size: 9px;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .progress {
   display: grid;
   grid-template-columns: 42px 1fr 58px;
@@ -751,6 +761,11 @@ footer button,
   border-color: transparent;
 }
 
+.queue-actions button:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+
 .queue-list {
   display: grid;
   gap: 6px;
@@ -778,6 +793,7 @@ footer button,
   font-size: 9px;
 }
 
+.queue-main,
 .queue-item strong,
 .queue-item em {
   overflow: hidden;
@@ -786,9 +802,24 @@ footer button,
   font-style: normal;
 }
 
+.queue-main {
+  display: grid;
+  gap: 2px;
+}
+
 .queue-item strong {
   color: var(--text);
   font-size: 11px;
+}
+
+.queue-reason {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.2;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .queue-item em {
@@ -1157,6 +1188,18 @@ footer button.active {
   background: var(--green);
   border-color: transparent;
   box-shadow: 0 0 20px rgba(49,242,162,.24);
+}
+
+footer button:disabled {
+  cursor: default;
+  opacity: .48;
+}
+
+footer button:disabled:hover {
+  color: var(--muted);
+  background: rgba(0,0,0,.24);
+  border-color: rgba(255,255,255,.09);
+  box-shadow: none;
 }
 
 .lyric-overlay {

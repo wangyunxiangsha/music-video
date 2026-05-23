@@ -25,6 +25,7 @@ const recommendationMixer = require('./recommendation-mixer');
 const recommendationExplainer = require('./recommendation-explainer');
 const playability = require('./playability');
 const playbackDiagnostics = require('./playback-diagnostics');
+const playbackMemory = require('./playback-memory');
 
 const app = express();
 const server = http.createServer(app);
@@ -189,6 +190,7 @@ function trackForPlaybackId(id) {
 }
 
 async function handlePlaybackFailure(event = {}) {
+  playbackMemory.recordFailure(event);
   const result = playbackDiagnostics.recordFailure(event);
   console.warn(
     `播放失败记录: stage=${event.stage || 'unknown'}, reason=${event.reason || 'unknown'}, `
@@ -486,7 +488,7 @@ async function rebuildUpcomingQueue() {
     if (scene) pool = await buildSmartQueue(scenes.buildScenePool(scene), { scene, limit: 80 });
   }
   if (!pool.length) pool = await buildDefaultQueuePool();
-  playlist = queue.rebuildQueue(pool);
+  playlist = queue.rebuildQueue(playbackMemory.preferPlayable(playbackMemory.filterBlocked(pool), 20));
   broadcastQueue();
   return getQueueState();
 }
@@ -520,6 +522,9 @@ function boostPlaylistByTaste(pool) {
   const topCategories = new Set((signals.topCategories || []).map(i => i.name));
   const hasFeedback = feedbackSignals.likedTrackKeys.size
     || feedbackSignals.dislikedTrackKeys.size
+    || feedbackSignals.skippedTrackKeys.size
+    || feedbackSignals.skippedArtists.size
+    || feedbackSignals.skippedVersionKeywords.size
     || feedbackSignals.temporaryReducedTrackKeys.size
     || feedbackSignals.blockedArtists.size
     || feedbackSignals.blockedCategories.size
@@ -527,28 +532,32 @@ function boostPlaylistByTaste(pool) {
     || feedbackSignals.reduceArtists.size;
   if (!topArtists.size && !topCategories.size && !hasFeedback) return pool;
 
-  return [...pool].filter(track => {
+  const filtered = [...pool].filter(track => {
     const artist = track.artists?.[0]?.name || track.ar?.[0]?.name || '';
     const category = track.categoryName || '';
     const trackKey = `${String(track.name || '').trim().toLowerCase()}::${String(artist).trim().toLowerCase()}`;
     return !feedbackSignals.dislikedTrackKeys.has(trackKey)
       && !feedbackSignals.blockedArtists.has(artist)
       && !feedbackSignals.blockedCategories.has(category);
-  }).sort((a, b) => {
-    const score = (track) => {
-      const artist = track.artists?.[0]?.name || track.ar?.[0]?.name || '';
-      const trackKey = `${String(track.name || '').trim().toLowerCase()}::${String(artist).trim().toLowerCase()}`;
-      let s = 0;
-      if (topArtists.has(artist)) s += 3;
-      if (track.categoryName && topCategories.has(track.categoryName)) s += 2;
-      if (feedbackSignals.likedTrackKeys.has(trackKey)) s += 5;
-      if (feedbackSignals.temporaryReducedTrackKeys.has(trackKey)) s -= 8;
-      if (feedbackSignals.boostArtists.has(artist)) s += 4;
-      if (feedbackSignals.reduceArtists.has(artist)) s -= 4;
-      if ((signals.recentSongs || []).includes(track.name)) s -= 4;
-      return s + Math.random() * 0.2;
-    };
-    return score(b) - score(a);
+  });
+  return recommendationMixer.weightedShuffle(filtered, (track) => {
+    const artist = track.artists?.[0]?.name || track.ar?.[0]?.name || '';
+    const trackKey = `${String(track.name || '').trim().toLowerCase()}::${String(artist).trim().toLowerCase()}`;
+    const versionText = `${track.name || ''} ${track.album?.name || track.al?.name || ''}`.toLowerCase();
+    let weight = 1;
+    if (topArtists.has(artist)) weight += 0.8;
+    if (track.categoryName && topCategories.has(track.categoryName)) weight += 0.5;
+    if (feedbackSignals.likedTrackKeys.has(trackKey)) weight += 2;
+    if (feedbackSignals.skippedTrackKeys.has(trackKey)) weight -= 1.2;
+    if (feedbackSignals.skippedArtists.has(artist)) weight -= 0.5;
+    for (const keyword of feedbackSignals.skippedVersionKeywords || []) {
+      if (versionText.includes(keyword)) weight -= 0.4;
+    }
+    if (feedbackSignals.temporaryReducedTrackKeys.has(trackKey)) weight -= 0.8;
+    if (feedbackSignals.boostArtists.has(artist)) weight += 1.5;
+    if (feedbackSignals.reduceArtists.has(artist)) weight -= 0.7;
+    if ((signals.recentSongs || []).includes(track.name)) weight -= 0.9;
+    return weight;
   });
 }
 
@@ -572,7 +581,7 @@ async function buildSmartQueue(localPool, { scene = activeScene, limit = 80 } = 
     limit,
     isBlocked: stats.isTrackBlocked
   });
-  return mixed.length ? mixed : boostPlaylistByTaste(localPool);
+  return playbackMemory.filterBlocked(mixed.length ? mixed : boostPlaylistByTaste(localPool));
 }
 
 async function loadUserPlaylistsIntoPool() {
@@ -668,7 +677,9 @@ async function nextTrack() {
   const picked = await playability.pickPlayableTrack({
     playlist,
     resolveUrl: resolveSongUrl,
-    maxAttempts: 8
+    maxAttempts: 8,
+    isBlocked: playbackMemory.isBlocked,
+    fallbackPlaylist: playbackMemory.recentPlayable(12)
   });
   playlist = picked.remaining;
   if (picked.skipped.length) {
@@ -719,6 +730,7 @@ app.get('/api/debug/qq-circuit', (req, res) => {
 app.get('/api/debug/playback', (req, res) => {
   res.json({
     ...playbackDiagnostics.snapshot(),
+    playbackMemory: playbackMemory.snapshot(),
     currentTrack: playbackDiagnostics.summarizeTrack(currentTrack),
     queue: getQueueState()
   });
@@ -736,7 +748,10 @@ app.post('/api/playback/failure', async (req, res) => {
     res.json({
       ok: true,
       rebuilt: result.shouldRebuild,
-      diagnostics: playbackDiagnostics.snapshot(),
+      diagnostics: {
+        ...playbackDiagnostics.snapshot(),
+        playbackMemory: playbackMemory.snapshot()
+      },
       queue: getQueueState()
     });
   } catch (e) {
@@ -861,6 +876,26 @@ app.post('/api/generate-taste', async (req, res) => {
   }
 });
 
+app.post('/api/local-pool/current', (req, res) => {
+  try {
+    if (!currentTrack) return res.status(400).json({ ok: false, reason: '当前没有正在播放的歌曲' });
+    if (currentTrack.recommendationSource !== 'external') {
+      return res.status(400).json({ ok: false, reason: '这首已经来自本地歌单池' });
+    }
+    const result = importer.addTrackToLocalPool(currentTrack);
+    if (result.ok) {
+      currentTrack = {
+        ...currentTrack,
+        recommendationSource: 'local',
+        recommendationReason: `已加入${result.playlistName}`
+      };
+    }
+    res.json({ ...result, track: currentTrack });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.get('/api/now', async (req, res) => {
   if (!weatherText) {
@@ -884,6 +919,17 @@ app.get('/api/daily-briefing', async (req, res) => {
 });
 
 app.post('/api/next', async (req, res) => {
+  const { skipReason, id } = req.body || {};
+  const matchesCurrent = !id || (currentTrack && String(currentTrack.id) === String(id));
+  if (skipReason && currentTrack && matchesCurrent) {
+    stats.saveFeedback({
+      type: 'skip',
+      target: 'track',
+      value: skipReason,
+      temporary: true,
+      track: currentTrack
+    });
+  }
   await nextTrack();
   res.json({ track: currentTrack, djMessage, queue: getQueueState() });
 });
@@ -976,7 +1022,9 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
       validateStatus: (status) => status >= 200 && status < 300,
       headers: streamHeaders
     });
-    playbackDiagnostics.recordSuccess(trackForPlaybackId(id));
+    const successfulTrack = trackForPlaybackId(id);
+    playbackDiagnostics.recordSuccess(successfulTrack);
+    playbackMemory.recordSuccess(successfulTrack);
 
     if (response.status === 206) {
       res.status(206);

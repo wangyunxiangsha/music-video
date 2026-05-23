@@ -28,6 +28,7 @@
   const songTitle = $('song-title');
   const songArtist= $('song-artist');
   const songAlbum = $('song-album');
+  const songReason = $('song-reason');
   const stationStatus = $('station-status');
   const clock     = $('clock');
   const headerDate = $('header-date');
@@ -56,7 +57,7 @@
   const btnTts    = $('btn-tts');
   const btnLyric  = $('btn-lyric');
   const btnHistory= $('btn-history');
-  const btnTaste  = $('btn-taste');
+  const btnSaveLocal = $('btn-save-local');
   const btnSettings = $('btn-settings');
   const statusScene = $('status-scene');
   const statusRatio = $('status-ratio');
@@ -94,6 +95,14 @@
 
   function artistOf(t) {
     return t.artists?.[0]?.name || t.ar?.[0]?.name || '未知艺术家';
+  }
+
+  function recommendationLabel(track = {}) {
+    const reason = track.recommendationReason || '';
+    if (reason) return reason;
+    if (track.recommendationSource === 'external') return '外部推荐';
+    if (track.recommendationSource === 'local') return '来自本地歌单';
+    return '';
   }
 
   function updateClock() {
@@ -211,13 +220,31 @@
       queueList.innerHTML = '<span class="queue-empty">暂无待播歌曲</span>';
       return;
     }
-    queueList.innerHTML = next.map((item, index) => `
+    queueList.innerHTML = next.map((item, index) => {
+      const reason = recommendationLabel(item);
+      return `
       <div class="queue-item">
         <span>${String(index + 1).padStart(2, '0')}</span>
-        <strong title="${escapeHtml(item.name)}">${escapeHtml(item.name || '未知歌曲')}</strong>
+        <div class="queue-main">
+          <strong title="${escapeHtml(item.name)}">${escapeHtml(item.name || '未知歌曲')}</strong>
+          ${reason ? `<small class="queue-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>` : ''}
+        </div>
         <em title="${escapeHtml(item.artist)}">${escapeHtml(item.artist || '未知歌手')}</em>
       </div>
-    `).join('');
+    `;
+    }).join('');
+  }
+
+  function renderQueueStatus(message) {
+    if (!queueList) return;
+    queueList.innerHTML = `<span class="queue-empty">${escapeHtml(message)}</span>`;
+  }
+
+  function setQueueActionPending(button, pending, idleLabel) {
+    if (!button) return;
+    button.disabled = pending;
+    button.textContent = pending ? 'BUSY' : idleLabel;
+    button.setAttribute('aria-busy', String(pending));
   }
 
   function ratioLabel(value) {
@@ -253,6 +280,14 @@
     renderStationStatus(settings);
   }
 
+  function updateSaveLocalButton() {
+    if (!btnSaveLocal) return;
+    const external = S.track?.recommendationSource === 'external';
+    btnSaveLocal.disabled = !external;
+    btnSaveLocal.textContent = external ? 'SAVE' : 'LOCAL';
+    btnSaveLocal.title = external ? '把这首外部推荐加入本地歌单池' : '当前歌曲已在本地歌单池';
+  }
+
   async function loadSettings() {
     try {
       const res = await fetch('/api/settings');
@@ -283,10 +318,14 @@
       return;
     }
     const artist = artistOf(nextTrack);
+    const reason = recommendationLabel(nextTrack);
     queueList.innerHTML = `
       <div class="queue-item">
         <span>01</span>
-        <strong title="${escapeHtml(nextTrack.name)}">${escapeHtml(nextTrack.name || '未知歌曲')}</strong>
+        <div class="queue-main">
+          <strong title="${escapeHtml(nextTrack.name)}">${escapeHtml(nextTrack.name || '未知歌曲')}</strong>
+          ${reason ? `<small class="queue-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>` : ''}
+        </div>
         <em title="${escapeHtml(artist)}">${escapeHtml(artist || '未知歌手')}</em>
       </div>
       <span class="queue-empty">${escapeHtml(message)}</span>
@@ -345,7 +384,9 @@
       options.body = JSON.stringify(body);
     }
     const res = await fetch(url, options);
-    return res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.reason || `request ${res.status}`);
+    return data;
   }
 
   // ─── WebSocket ─────────────────────────────────────────────────────────────
@@ -434,10 +475,15 @@
     } catch {}
   }
 
-  function requestNextTrack(reason) {
+  function requestNextTrack(reason = '', skipReason = '') {
     stopCurrentDjVoice(true);
     if (reason) addBubble('dj', reason);
-    return fetch('/api/next', { method: 'POST' }).catch(() => {});
+    const options = { method: 'POST' };
+    if (skipReason && S.track) {
+      options.headers = { 'Content-Type': 'application/json' };
+      options.body = JSON.stringify({ skipReason, id: S.track.id });
+    }
+    return fetch('/api/next', options).catch(() => {});
   }
 
   // ─── Load track ────────────────────────────────────────────────────────────
@@ -447,6 +493,7 @@
     S.track = track;
     S.userRequested = userRequested;
     app.classList.remove('loading');
+    updateSaveLocalButton();
 
     const artist  = artistOf(track);
     const album   = track.album?.name || track.al?.name || '';
@@ -455,6 +502,7 @@
     songTitle.textContent  = track.name || '未知歌曲';
     songArtist.textContent = artist;
     songAlbum.textContent  = album;
+    if (songReason) songReason.textContent = recommendationLabel(track);
 
     if (picUrl) {
       const img = new Image();
@@ -492,7 +540,7 @@
     if (audio.paused) { audio.play(); } else { audio.pause(); }
   };
 
-  btnNext.onclick = () => requestNextTrack();
+  btnNext.onclick = () => requestNextTrack('', 'manual_skip');
 
   btnPrev.onclick = () => {
     if (audio.currentTime > 4) audio.currentTime = 0;
@@ -501,6 +549,26 @@
 
   if (btnLike) btnLike.onclick = () => sendFeedbackCommand('\u559c\u6b22\u8fd9\u9996');
   if (btnDislike) btnDislike.onclick = () => sendFeedbackCommand('\u5c11\u653e\u8fd9\u9996');
+  if (btnSaveLocal) {
+    btnSaveLocal.onclick = async () => {
+      if (!S.track || S.track.recommendationSource !== 'external') return;
+      btnSaveLocal.disabled = true;
+      btnSaveLocal.textContent = 'BUSY';
+      try {
+        const res = await fetch('/api/local-pool/current', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.reason || '保存失败');
+        if (data.track) S.track = data.track;
+        btnSaveLocal.textContent = data.added ? 'SAVED' : 'LOCAL';
+        addBubble('dj', data.added ? `《${S.track.name}》已加入${data.playlistName}。` : `《${S.track.name}》已经在${data.playlistName}里。`);
+      } catch (error) {
+        btnSaveLocal.textContent = 'SAVE';
+        addBubble('dj', error.message || '保存到本地歌单池失败。');
+      } finally {
+        updateSaveLocalButton();
+      }
+    };
+  }
 
   audio.onended  = () => requestNextTrack();
   audio.onplay   = () => {
@@ -807,12 +875,17 @@
 
   if (queueRebuild) {
     queueRebuild.onclick = async () => {
+      setQueueActionPending(queueRebuild, true, 'RESHUFFLE');
+      renderQueueStatus('正在重新生成队列...');
       try {
         const data = await postQueueAction('/api/queue/rebuild');
-        renderQueue(data.queue);
+        if (data.queue) renderQueue(data.queue);
         addBubble('dj', '队列已经重新生成。');
-      } catch {
+      } catch (error) {
+        renderQueueStatus(`重新生成队列失败：${error.message || '稍后再试'}`);
         addBubble('dj', '重新生成队列失败，稍后再试。');
+      } finally {
+        setQueueActionPending(queueRebuild, false, 'RESHUFFLE');
       }
     };
   }
@@ -953,47 +1026,6 @@
     historyOv.setAttribute('aria-hidden', 'true');
     btnHistory.classList.remove('active');
   }
-
-  // ─── Import playlists + Generate Taste ────────────────────────────────────
-  btnTaste.onclick = async () => {
-    btnTaste.disabled = true;
-    const showChat = () => { if (!S.chatOpen) { S.chatOpen = true; chat.style.display = 'block'; btnChat.classList.add('active'); } };
-
-    // Step 1: Import playlists
-    btnTaste.textContent = 'SYNC';
-    btnTaste.title = '正在导入歌单…';
-    addBubble('dj', '开始从网易云 + QQ音乐导入歌单，请稍候…');
-    showChat();
-
-    try {
-      const r1 = await fetch('/api/import-playlists', { method: 'POST' });
-      const d1 = await r1.json();
-      if (!d1.ok) {
-        addBubble('dj', `导入失败：${d1.log?.join(' | ') || '未知错误'}`);
-        btnTaste.textContent = 'TASTE'; btnTaste.disabled = false;
-        return;
-      }
-      addImportSummary(d1);
-
-      // Step 2: Generate taste.md
-      btnTaste.title = '正在生成品味档案…';
-      addBubble('dj', '正在用 AI 分析你的音乐品味…');
-      const r2 = await fetch('/api/generate-taste', { method: 'POST' });
-      const d2 = await r2.json();
-      if (d2.ok) {
-        btnTaste.textContent = 'DONE';
-        btnTaste.title = `品味档案已更新（${d2.playlistCount} 个歌单，${d2.songCount} 首歌）`;
-        addBubble('dj', `✨ 品味档案生成完毕！DJ 推荐将更贴合你的口味~`);
-      } else {
-        addBubble('dj', `品味生成失败：${d2.reason || '未知错误'}`);
-      }
-    } catch (e) {
-      addBubble('dj', `操作失败：${e.message}`);
-    }
-
-    btnTaste.disabled = false;
-    setTimeout(() => { if (btnTaste.textContent === 'DONE') { btnTaste.textContent = 'TASTE'; btnTaste.title = '从歌单导入并生成品味档案'; } }, 8000);
-  };
 
   function closeLyric() {
     lyricOv.classList.remove('open');

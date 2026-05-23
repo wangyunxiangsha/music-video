@@ -70,6 +70,39 @@ async function run() {
   const localOnly = mixer.mixRecommendationQueue({ localPool, externalPool, localRatio: 1, limit: 6 });
   assert.deepStrictEqual(localOnly.map(item => item.id), ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']);
 
+  const artistHeavy = mixer.mixRecommendationQueue({
+    localPool: [
+      track('jj1', 'JJ 1', '林俊杰'),
+      track('jj2', 'JJ 2', '林俊杰'),
+      track('jj3', 'JJ 3', '林俊杰'),
+      track('vae1', 'V 1', '许嵩'),
+      track('sing1', 'S 1', 'SING女团')
+    ],
+    externalPool: [],
+    localRatio: 1,
+    limit: 5
+  });
+  assert.deepStrictEqual(
+    artistHeavy.map(item => item.artist || item.artists?.[0]?.name),
+    ['林俊杰', '许嵩', 'SING女团', '林俊杰', '林俊杰']
+  );
+
+  const externalArtistHeavy = mixer.mixRecommendationQueue({
+    localPool: [],
+    externalPool: [
+      track('ejj1', 'EJJ 1', '林俊杰', { recommendationSource: 'external' }),
+      track('ejj2', 'EJJ 2', '林俊杰', { recommendationSource: 'external' }),
+      track('evae1', 'EV 1', '许嵩', { recommendationSource: 'external' }),
+      track('esing1', 'ES 1', 'SING女团', { recommendationSource: 'external' })
+    ],
+    localRatio: 0,
+    limit: 4
+  });
+  assert.deepStrictEqual(
+    externalArtistHeavy.map(item => item.artists?.[0]?.name),
+    ['林俊杰', '许嵩', 'SING女团', '林俊杰']
+  );
+
   const deduped = mixer.mixRecommendationQueue({
     localPool: [track('same', 'Same'), track('l2', 'Local 2')],
     externalPool: [track('same', 'Same', 'Artist', { recommendationSource: 'external' }), track('e1', 'External 1', 'New', { recommendationSource: 'external' })],
@@ -106,6 +139,31 @@ async function run() {
   assert.strictEqual(external[0].recommendationSource, 'external');
   assert.strictEqual(external[0].sourceReason, '林俊杰');
   assert.deepStrictEqual(external.map(item => item.id), ['n1']);
+
+  const seeds = mixer.querySeeds({
+    tasteSignals: {
+      topArtists: [{ name: '林俊杰', count: 26 }, { name: '许嵩', count: 18 }],
+      topCategories: [{ name: '国风古风', count: 23 }, { name: 'BGM/纯音乐', count: 12 }]
+    },
+    slot: { slotLabel: '上午' }
+  });
+  assert.deepStrictEqual(seeds.map(seed => seed.query), [
+    '国风古风 推荐',
+    'BGM/纯音乐 推荐',
+    '上午 音乐',
+    '林俊杰 相似推荐'
+  ]);
+
+  const rolls = [0.25, 0.9];
+  const weighted = mixer.weightedShuffle(
+    [
+      track('top', 'Top', '林俊杰'),
+      track('other', 'Other', '冷门歌手')
+    ],
+    item => item.id === 'top' ? 4 : 1,
+    () => rolls.shift()
+  );
+  assert.deepStrictEqual(weighted.map(item => item.id), ['other', 'top']);
 
   assert.strictEqual(mixer.resolveExternalRecommendationRatio({ env: { EXTERNAL_RECOMMEND_RATIO: '0.4' } }), 0.4);
   assert.strictEqual(mixer.resolveExternalRecommendationRatio({ env: { EXTERNAL_RECOMMEND_RATIO: 'bad' } }), 0.25);

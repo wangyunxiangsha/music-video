@@ -89,6 +89,16 @@ function normalizeTrackKey(track = {}) {
   return `${String(name).trim().toLowerCase()}::${String(artist).trim().toLowerCase()}`;
 }
 
+function versionKeywords(name = '') {
+  const text = String(name).toLowerCase();
+  const hits = [];
+  if (/live|concert|现场|演唱会/.test(text)) hits.push('live');
+  if (/remix|mix|dj|混音/.test(text)) hits.push('remix');
+  if (/demo|cover|翻唱|片段|剪辑|铃声/.test(text)) hits.push('variant');
+  if (/伴奏|instrumental|karaoke/.test(text)) hits.push('instrumental');
+  return hits;
+}
+
 function saveFeedback(action) {
   const db = load();
   const now = Math.floor(Date.now() / 1000);
@@ -120,6 +130,11 @@ function getFeedbackSignals(limit = 200) {
   return {
     likedTrackKeys: new Set(events.filter(e => e.type === 'like' && e.track_key).map(e => e.track_key)),
     dislikedTrackKeys: new Set(events.filter(e => e.type === 'dislike' && e.track_key).map(e => e.track_key)),
+    skippedTrackKeys: new Set(events.filter(e => e.type === 'skip' && e.track_key).map(e => e.track_key)),
+    skippedArtists: new Set(events.filter(e => e.type === 'skip' && e.artist).map(e => e.artist)),
+    skippedVersionKeywords: new Set(events
+      .filter(e => e.type === 'skip' && e.song_name)
+      .flatMap(e => versionKeywords(e.song_name))),
     temporaryReducedTrackKeys: new Set(events.filter(e => e.type === 'not_vibe' && e.track_key).map(e => e.track_key)),
     blockedArtists: new Set(events.filter(e => e.type === 'block' && e.target === 'artist').map(e => e.value)),
     blockedCategories: new Set(events.filter(e => e.type === 'block' && e.target === 'category').map(e => e.value)),
