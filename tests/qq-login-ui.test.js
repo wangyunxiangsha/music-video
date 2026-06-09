@@ -12,6 +12,7 @@ const helper = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'qq-login-h
 
 assert.match(server, /const qqLoginManager\s*=\s*require\('\.\/qq-login-manager'\)/);
 assert.match(server, /app\.get\('\/api\/qq-login\/status'/);
+assert.match(server, /qqCookieHealth:\s*qqmusic\.getCookieHealth\(\)/);
 assert.match(server, /app\.post\('\/api\/qq-login\/start'/);
 assert.match(server, /app\.post\('\/api\/qq-login\/cancel'/);
 
@@ -26,6 +27,8 @@ assert.match(js, /refreshQqLoginStatus/);
 assert.match(js, /startQqLogin/);
 assert.match(js, /\/api\/qq-login\/start/);
 assert.match(js, /\/api\/qq-login\/status/);
+assert.match(js, /qqCookieHealth\?\.suspectedExpired/);
+assert.match(js, /疑似过期，请扫码刷新/);
 
 assert.match(css, /\.qq-login-panel/);
 assert.match(css, /\.qq-login-qr/);

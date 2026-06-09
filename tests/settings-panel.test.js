@@ -26,7 +26,7 @@ assert.match(js, /btnSettings\.onclick/);
 
 assert.match(css, /\.status-strip/);
 assert.match(css, /\.settings-panel/);
-assert.match(css, /grid-template-columns: repeat\(6, 1fr\)/);
+assert.match(css, /grid-template-columns: repeat\(5, 1fr\)/);
 
 assert.match(server, /app\.get\('\/api\/settings'/);
 assert.match(server, /app\.patch\('\/api\/settings'/);

@@ -62,7 +62,11 @@ setTimeout(() => {
     python: process.execPath,
     helperScript: noisySuccessHelper,
     qrTimeoutMs: 500,
-    envFile
+    envFile,
+    onCookieUpdated: (cookie) => {
+      assert.match(cookie, /qqmusic_key=fresh-key/);
+      process.env.QQ_LOGIN_TEST_REFRESHED = String(Number(process.env.QQ_LOGIN_TEST_REFRESHED || 0) + 1);
+    }
   });
   setTimeout(() => {
     const done = qqLogin.getStatus();
@@ -70,6 +74,7 @@ setTimeout(() => {
     assert.strictEqual(done.message, 'QQ Music login refreshed');
     assert.doesNotMatch(done.message, /Event loop is closed/);
     assert.match(fs.readFileSync(envFile, 'utf8'), /^QQ_MUSIC_COOKIE=uin=o987654321; qqmusic_key=fresh-key; qm_keyst=fresh-key$/m);
+    assert.strictEqual(process.env.QQ_LOGIN_TEST_REFRESHED, '1');
     console.log('qq login manager tests passed');
   }, 120);
 }, 120);

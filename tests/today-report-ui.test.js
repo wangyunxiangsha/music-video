@@ -12,8 +12,12 @@ assert.match(html, /id="today-report"/);
 assert.match(app, /const todayReport\s*=\s*\$\('today-report'\)/);
 assert.match(app, /function renderTodayReport/);
 assert.match(app, /renderTodayReport\(data\?\.todayReport\)/);
+assert.match(app, /today-report-learning/);
+assert.match(app, /data\.insights/);
+assert.match(app, /data\.adjustments/);
 assert.match(server, /app\.get\('\/api\/listening-report\/today'/);
 assert.match(css, /\.today-report/);
 assert.match(css, /\.today-report-metrics/);
+assert.match(css, /\.today-report-learning/);
 
 console.log('today report UI tests passed');

@@ -26,6 +26,8 @@ const recommendationExplainer = require('./recommendation-explainer');
 const playability = require('./playability');
 const playbackDiagnostics = require('./playback-diagnostics');
 const playbackMemory = require('./playback-memory');
+const playbackFailure = require('./playback-failure');
+const nextTrackSelection = require('./next-track-selection');
 const health = require('./health');
 const tasteProfile = require('./taste-profile');
 const radioMemory = require('./radio-memory');
@@ -38,7 +40,10 @@ const wss = new WebSocketServer({ server, path: '/stream' });
 
 const PORT = Number(process.env.PORT || 8080);
 const PORT_RETRY_LIMIT = Number(process.env.PORT_RETRY_LIMIT || 10);
+const TRIAL_CLIP_NEXT_LIMIT = 3;
+const TRIAL_CLIP_NEXT_WINDOW_MS = 45000;
 const startedAt = new Date().toISOString();
+const RUNTIME_FILE = path.join(__dirname, '../data/runtime.json');
 const DEFAULT_EXTERNAL_RECOMMEND_RATIO = recommendationMixer.resolveExternalRecommendationRatio({
   env: process.env
 });
@@ -73,7 +78,11 @@ let dailyBriefing = null;
 let activeExplorationMode = stats.getPreference('explorationMode', 'balanced');
 let activeExternalRecommendRatio = stats.getPreference('externalRecommendRatio', DEFAULT_EXTERNAL_RECOMMEND_RATIO);
 let activeExternalRecommendEnabled = stats.getPreference('externalRecommendEnabled', true) !== false;
+let activeStationMood = stats.getPreference('stationMood', 'balanced');
+let activeArtistRepeatMode = stats.getPreference('artistRepeatMode', 'normal');
 let activePort = null;
+let nextRequestInFlight = null;
+let trialClipNextRequests = [];
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -89,8 +98,8 @@ function getQueueState(limit = 5) {
     currentTrack,
     playlist,
     limit,
-    scene: activeScene,
-    djPolicy: activePolicy,
+    scene: getEffectiveScene(),
+    djPolicy: getEffectivePolicy(),
     recommendation: {
       explorationMode: activeExplorationMode,
       externalRatio: currentExternalRecommendationRatio()
@@ -106,15 +115,37 @@ function currentExternalRecommendationRatio() {
   );
 }
 
+function currentTimeStrategy(now = new Date()) {
+  return dailyStation.getTimeSlotStrategy(now);
+}
+
+function getEffectiveScene(now = new Date()) {
+  return activeScene || currentTimeStrategy(now).scene || null;
+}
+
+function getEffectivePolicy(now = new Date()) {
+  if (activeScene) return activePolicy;
+  const mode = currentTimeStrategy(now).djPolicyMode;
+  return mode ? djPolicy.clonePolicy(mode) : activePolicy;
+}
+
 function getStationSettings() {
+  const timeStrategy = currentTimeStrategy();
   return {
     scene: activeScene,
+    effectiveScene: getEffectiveScene(),
     djPolicy: activePolicy,
+    effectiveDjPolicy: getEffectivePolicy(),
+    timeStrategy,
     recommendation: {
       explorationMode: activeExplorationMode,
       externalEnabled: activeExternalRecommendEnabled,
       externalRatio: currentExternalRecommendationRatio(),
       configuredExternalRatio: activeExternalRecommendRatio
+    },
+    tuning: {
+      mood: activeStationMood,
+      artistRepeatMode: activeArtistRepeatMode
     },
     scenes: scenes.summarizeScenes()
   };
@@ -141,6 +172,18 @@ async function applyStationSettings(input = {}) {
   if (body.djPolicyMode) {
     activePolicy = djPolicy.clonePolicy(body.djPolicyMode);
     policyPlayCount = 0;
+  }
+
+  if (body.stationMood) {
+    activeStationMood = ['quiet', 'lively', 'balanced'].includes(body.stationMood)
+      ? body.stationMood
+      : 'balanced';
+    stats.savePreference('stationMood', activeStationMood);
+  }
+
+  if (body.artistRepeatMode) {
+    activeArtistRepeatMode = body.artistRepeatMode === 'less' ? 'less' : 'normal';
+    stats.savePreference('artistRepeatMode', activeArtistRepeatMode);
   }
 
   if ('sceneId' in body) {
@@ -170,6 +213,21 @@ function readUserFile(relativePath) {
   }
 }
 
+function writeRuntimeInfo({ port, startedAt: runtimeStartedAt = startedAt } = {}) {
+  const runtimeInfo = {
+    port,
+    url: `http://localhost:${port}`,
+    startedAt: runtimeStartedAt
+  };
+  try {
+    fs.mkdirSync(path.dirname(RUNTIME_FILE), { recursive: true });
+    fs.writeFileSync(RUNTIME_FILE, JSON.stringify(runtimeInfo, null, 2), 'utf8');
+  } catch (error) {
+    logger.warn(`运行时端口文件写入失败: ${error.message}`);
+  }
+  return runtimeInfo;
+}
+
 async function ensureDailyBriefing(now = new Date()) {
   if (!weatherText) {
     weatherText = await weather.getWeatherText().catch(() => '');
@@ -196,7 +254,30 @@ function trackForPlaybackId(id) {
   return found || { id, source: String(id).startsWith('qq:') ? 'qq' : 'netease' };
 }
 
+function knownTrackForPlaybackId(id) {
+  if (!id) return currentTrack;
+  if (currentTrack && String(currentTrack.id) === String(id)) return currentTrack;
+  return playlist.find((track) => String(track.id) === String(id)) || null;
+}
+
+function canAcceptTrialClipNext(now = Date.now()) {
+  trialClipNextRequests = trialClipNextRequests.filter((ts) => now - ts < TRIAL_CLIP_NEXT_WINDOW_MS);
+  if (trialClipNextRequests.length >= TRIAL_CLIP_NEXT_LIMIT) return false;
+  trialClipNextRequests.push(now);
+  return true;
+}
+
+function resetTrialClipNextRequests() {
+  trialClipNextRequests = [];
+}
+
 async function handlePlaybackFailure(event = {}) {
+  if (playbackFailure.shouldIgnorePlaybackFailure(event)) {
+    logger.info(
+      `忽略客户端关闭的音频流: track=${event.track?.name || event.track?.id || 'unknown'}, detail=${event.detail || ''}`
+    );
+    return { ignored: true, shouldRebuild: false };
+  }
   playbackMemory.recordFailure(event);
   const result = playbackDiagnostics.recordFailure(event);
   logger.warn(
@@ -223,7 +304,10 @@ wss.on('connection', (ws) => {
     queue: getQueueState(),
     dailyBriefing,
     djPolicy: activePolicy,
-    scene: activeScene
+    effectiveDjPolicy: getEffectivePolicy(),
+    scene: activeScene,
+    effectiveScene: getEffectiveScene(),
+    timeStrategy: currentTimeStrategy()
   }));
   ws.on('close', () => clients.delete(ws));
   ws.on('error', () => clients.delete(ws));
@@ -376,12 +460,30 @@ async function findRequestedSong(songName) {
   const parsed = parseArtistSong(songName);
   const query  = parsed ? `${parsed.artist} ${parsed.song}` : songName;
   const artist = parsed?.artist || recommendationMixer.originalArtistForSong(songName) || null;
+  const requestedTitle = parsed?.song || songName;
 
-  // ── 1. Netease first ────────────────────────────────────────────────────────
+  // ── 1. QQ Music first for explicit requests to avoid Netease preview clips ──
+  if (qqmusic.isEnabled()) {
+    logger.info(`优先尝试 QQ 音乐点歌: ${query}`);
+    const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
+    const qqClean    = recommendationMixer.preferCleanVersions(qqResults);
+    const qqTitleMatched = recommendationMixer.preferTitleMatches(qqClean, requestedTitle);
+    const qqArtistMatched = recommendationMixer.preferArtistMatches(qqTitleMatched, artist);
+    const qqOriginalPreferred = recommendationMixer.preferOriginalArtist(qqArtistMatched, requestedTitle);
+    const qqRanked   = rankByArtist(qqOriginalPreferred, artist);
+    const qqFiltered = artist ? qqRanked : qqRanked.slice(0, 1);
+    for (const candidate of qqFiltered.slice(0, 3)) {
+      const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
+      if (url) return candidate;
+    }
+  }
+
+  // ── 2. Fall back to Netease ─────────────────────────────────────────────────
   const neteaseResults = dedupeSongs(await music.searchSongs(query, 10));
   const neteaseClean   = recommendationMixer.preferCleanVersions(neteaseResults);
-  const neteaseArtistMatched = recommendationMixer.preferArtistMatches(neteaseClean, artist);
-  const neteaseOriginalPreferred = recommendationMixer.preferOriginalArtist(neteaseArtistMatched, songName);
+  const neteaseTitleMatched = recommendationMixer.preferTitleMatches(neteaseClean, requestedTitle);
+  const neteaseArtistMatched = recommendationMixer.preferArtistMatches(neteaseTitleMatched, artist);
+  const neteaseOriginalPreferred = recommendationMixer.preferOriginalArtist(neteaseArtistMatched, requestedTitle);
   const neteaseRanked  = rankByArtist(neteaseOriginalPreferred, artist);
   const neteaseOrdered = [
     ...neteaseRanked.filter(isPlayable),
@@ -391,21 +493,6 @@ async function findRequestedSong(songName) {
   for (const candidate of neteaseOrdered) {
     const url = await music.getSongUrl(candidate.id);
     if (url) return candidate;
-  }
-
-  // ── 2. Fall back to QQ Music (needs SVIP for most songs) ────────────────────
-  if (qqmusic.isEnabled()) {
-    logger.info(`网易云未找到，尝试 QQ 音乐: ${query}`);
-    const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
-    const qqClean    = recommendationMixer.preferCleanVersions(qqResults);
-    const qqArtistMatched = recommendationMixer.preferArtistMatches(qqClean, artist);
-    const qqOriginalPreferred = recommendationMixer.preferOriginalArtist(qqArtistMatched, songName);
-    const qqRanked   = rankByArtist(qqOriginalPreferred, artist);
-    const qqFiltered = artist ? qqRanked : qqRanked.slice(0, 1);
-    for (const candidate of qqFiltered.slice(0, 3)) {
-      const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
-      if (url) return candidate;
-    }
   }
 
   return null;
@@ -522,9 +609,10 @@ function isPlayable(song) {
   return pl > 0;
 }
 
-function boostPlaylistByTaste(pool) {
+function boostPlaylistByTaste(pool, { scene = activeScene } = {}) {
   const signals = stats.getTasteSignals(120);
-  const feedbackSignals = stats.getFeedbackSignals(200);
+  const feedbackSignals = stats.getFeedbackSignals(200, { scene });
+  const recentArtists = new Set(stats.getRecentPlays(12).map(play => play.artist).filter(Boolean));
   const topArtists = new Set((signals.topArtists || []).map(i => i.name));
   const topCategories = new Set((signals.topCategories || []).map(i => i.name));
   const hasFeedback = feedbackSignals.likedTrackKeys.size
@@ -536,7 +624,9 @@ function boostPlaylistByTaste(pool) {
     || feedbackSignals.blockedArtists.size
     || feedbackSignals.blockedCategories.size
     || feedbackSignals.boostArtists.size
-    || feedbackSignals.reduceArtists.size;
+    || feedbackSignals.reduceArtists.size
+    || feedbackSignals.sceneReducedTrackKeys.size
+    || feedbackSignals.sceneBoostedTrackKeys.size;
   if (!topArtists.size && !topCategories.size && !hasFeedback) return pool;
 
   const filtered = [...pool].filter(track => {
@@ -548,47 +638,40 @@ function boostPlaylistByTaste(pool) {
       && !feedbackSignals.blockedCategories.has(category);
   });
   return recommendationMixer.weightedShuffle(filtered, (track) => {
-    const artist = track.artists?.[0]?.name || track.ar?.[0]?.name || '';
-    const trackKey = `${String(track.name || '').trim().toLowerCase()}::${String(artist).trim().toLowerCase()}`;
-    const versionText = `${track.name || ''} ${track.album?.name || track.al?.name || ''}`.toLowerCase();
-    let weight = 1;
-    if (topArtists.has(artist)) weight += 0.8;
-    if (track.categoryName && topCategories.has(track.categoryName)) weight += 0.5;
-    if (feedbackSignals.likedTrackKeys.has(trackKey)) weight += 2;
-    if (feedbackSignals.skippedTrackKeys.has(trackKey)) weight -= 1.2;
-    if (feedbackSignals.skippedArtists.has(artist)) weight -= 0.5;
-    for (const keyword of feedbackSignals.skippedVersionKeywords || []) {
-      if (versionText.includes(keyword)) weight -= 0.4;
-    }
-    if (feedbackSignals.temporaryReducedTrackKeys.has(trackKey)) weight -= 0.8;
-    if (feedbackSignals.boostArtists.has(artist)) weight += 1.5;
-    if (feedbackSignals.reduceArtists.has(artist)) weight -= 0.7;
-    if ((signals.recentSongs || []).includes(track.name)) weight -= 0.9;
-    return weight;
+    return recommendationMixer.tasteWeightForTrack({
+      track,
+      tasteSignals: signals,
+      feedbackSignals,
+      topArtists,
+      topCategories,
+      recentArtists,
+      artistRepeatMode: activeArtistRepeatMode
+    });
   });
 }
 
 async function buildSmartQueue(localPool, { scene = activeScene, limit = 80 } = {}) {
+  const effectiveScene = scene || getEffectiveScene();
   const externalRatio = currentExternalRecommendationRatio();
   const externalPool = externalRatio > 0
     ? await recommendationMixer.buildExternalRecommendationPool({
         music,
         qqmusic,
         tasteSignals: stats.getTasteSignals(120),
-        scene,
-        slot: dailyBriefing || dailyStation.getTimeSlot(new Date()),
+        scene: effectiveScene,
+        slot: dailyBriefing || currentTimeStrategy(),
         limit: Math.max(8, Math.ceil(limit * Math.max(externalRatio, 0.15))),
         isBlocked: stats.isTrackBlocked
       })
     : [];
   const mixed = recommendationMixer.mixRecommendationQueue({
-    localPool: boostPlaylistByTaste(localPool),
+    localPool: boostPlaylistByTaste(localPool, { scene: effectiveScene }),
     externalPool,
     localRatio: 1 - externalRatio,
     limit,
     isBlocked: stats.isTrackBlocked
   });
-  return playbackMemory.filterBlocked(mixed.length ? mixed : boostPlaylistByTaste(localPool));
+  return playbackMemory.filterBlocked(mixed.length ? mixed : boostPlaylistByTaste(localPool, { scene: effectiveScene }));
 }
 
 async function loadUserPlaylistsIntoPool() {
@@ -671,7 +754,8 @@ async function loadPlaylist() {
   playlist = [...MOCK_PLAYLIST];
 }
 
-async function nextTrack() {
+async function nextTrack({ maxAttempts = 8 } = {}) {
+  const previousTrack = currentTrack;
   if (playlist.length === 0) {
     await loadPlaylist();
   } else if (playlist.length < 5) {
@@ -684,16 +768,20 @@ async function nextTrack() {
   const picked = await playability.pickPlayableTrack({
     playlist,
     resolveUrl: resolveSongUrl,
-    maxAttempts: 8,
+    maxAttempts,
     isBlocked: playbackMemory.isBlocked,
     fallbackPlaylist: playbackMemory.recentPlayable(12)
   });
-  playlist = picked.remaining;
-  if (picked.skipped.length) {
-    logger.warn(`跳过 ${picked.skipped.length} 首暂不可播放的候选，继续寻找下一首`);
+  const selection = nextTrackSelection.applyPlayablePick(picked);
+  playlist = selection.playlist;
+  if (selection.skippedCount) {
+    logger.warn(`跳过 ${selection.skippedCount} 首暂不可播放的候选，继续寻找下一首`);
   }
-  currentTrack = picked.track || playlist.shift();
-  if (!currentTrack) return;
+  currentTrack = selection.track;
+  if (!currentTrack) {
+    currentTrack = previousTrack;
+    return selection;
+  }
 
   stats.savePlay(currentTrack);
 
@@ -714,6 +802,7 @@ async function nextTrack() {
     djPolicy: activePolicy,
     scene: activeScene
   });
+  return selection;
 }
 
 // ─── Debug ────────────────────────────────────────────────────────────────────
@@ -743,14 +832,32 @@ app.get('/api/debug/playback', (req, res) => {
   });
 });
 
+app.get('/api/debug/stats-storage', (req, res) => {
+  res.json(stats.getStorageReport());
+});
+
 app.post('/api/playback/failure', async (req, res) => {
   const { id, stage, reason, detail } = req.body || {};
   try {
+    const track = id ? knownTrackForPlaybackId(id) : currentTrack;
+    if (id && !track) {
+      logger.warn(`Ignoring stale client playback failure: requestTrack=${id}, currentTrack=${currentTrack?.id || 'none'}`);
+      return res.json({
+        ok: true,
+        ignored: true,
+        stale: true,
+        diagnostics: {
+          ...playbackDiagnostics.snapshot(),
+          playbackMemory: playbackMemory.snapshot()
+        },
+        queue: getQueueState()
+      });
+    }
     const result = await handlePlaybackFailure({
       stage: stage || 'client',
       reason: reason || 'client_report',
       detail,
-      track: id ? trackForPlaybackId(id) : currentTrack
+      track
     });
     res.json({
       ok: true,
@@ -907,6 +1014,49 @@ app.post('/api/local-pool/current', (req, res) => {
 });
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
+app.post('/api/local-pool/remove-current', async (req, res) => {
+  try {
+    if (!currentTrack) return res.status(400).json({ ok: false, reason: '当前没有正在播放的歌曲' });
+    if (currentTrack.recommendationSource === 'external') {
+      return res.status(400).json({ ok: false, reason: '这首是外部推荐，不在本地歌单池' });
+    }
+    if (currentTrack.recommendationSource === 'removed') {
+      return res.status(400).json({ ok: false, reason: '这首已经从本地歌单池删除' });
+    }
+    const result = importer.removeTrackFromLocalPool(currentTrack);
+    if (!result.ok) return res.status(400).json(result);
+    playlist = playlist.filter(track => importer.trackKey(track) !== result.key);
+    currentTrack = {
+      ...currentTrack,
+      recommendationSource: 'removed',
+      recommendationReason: '已从本地歌单池删除'
+    };
+    broadcastQueue();
+    res.json({ ...result, track: currentTrack, queue: getQueueState() });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+app.get('/api/local-pool/removed', (req, res) => {
+  try {
+    res.json({ ok: true, removedTracks: importer.listRemovedTracks() });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
+app.post('/api/local-pool/restore', (req, res) => {
+  try {
+    const key = String(req.body?.key || '');
+    const result = importer.restoreRemovedTrack(key);
+    if (!result.ok) return res.status(400).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: e.message });
+  }
+});
+
 app.get('/api/now', async (req, res) => {
   if (!weatherText) {
     weatherText = await weather.getWeatherText().catch(() => '');
@@ -919,7 +1069,10 @@ app.get('/api/now', async (req, res) => {
     queue: getQueueState(),
     dailyBriefing,
     djPolicy: activePolicy,
-    scene: activeScene
+    effectiveDjPolicy: getEffectivePolicy(),
+    scene: activeScene,
+    effectiveScene: getEffectiveScene(),
+    timeStrategy: currentTimeStrategy()
   });
 });
 
@@ -929,19 +1082,62 @@ app.get('/api/daily-briefing', async (req, res) => {
 });
 
 app.post('/api/next', async (req, res) => {
-  const { skipReason, id } = req.body || {};
-  const matchesCurrent = !id || (currentTrack && String(currentTrack.id) === String(id));
-  if (skipReason && currentTrack && matchesCurrent) {
-    stats.saveFeedback({
-      type: 'skip',
-      target: 'track',
-      value: skipReason,
-      temporary: true,
-      track: currentTrack
-    });
+  const { skipReason, id, reason } = req.body || {};
+  const hasClientTrackId = id !== undefined && id !== null && id !== '';
+  const matchesCurrent = !hasClientTrackId || (currentTrack && String(currentTrack.id) === String(id));
+  const requestTrackId = hasClientTrackId
+    ? String(id)
+    : (currentTrack ? String(currentTrack.id) : '__none__');
+  if (reason === 'trial_clip' && !canAcceptTrialClipNext()) {
+    logger.warn(`限制连续试听片段自动切歌: requestTrack=${requestTrackId}`);
+    return res.json({ track: currentTrack, djMessage, queue: getQueueState(), trialLimited: true });
   }
-  await nextTrack();
-  res.json({ track: currentTrack, djMessage, queue: getQueueState() });
+  if (nextRequestInFlight && nextRequestInFlight.trackId === requestTrackId) {
+    logger.warn(
+      `忽略重复切歌请求: requestTrack=${requestTrackId}, reason=${reason || skipReason || 'unknown'}`
+    );
+    const payload = await nextRequestInFlight.promise;
+    return res.json({ ...payload, duplicate: true });
+  }
+  if (hasClientTrackId && !matchesCurrent) {
+    logger.warn(
+      `忽略过期切歌请求: requestTrack=${id}, currentTrack=${currentTrack?.id || 'none'}, reason=${reason || skipReason || 'unknown'}`
+    );
+    return res.json({ track: currentTrack, djMessage, queue: getQueueState(), stale: true });
+  }
+  const inFlight = {
+    trackId: requestTrackId,
+    promise: (async () => {
+      if (skipReason && currentTrack && matchesCurrent) {
+        stats.saveFeedback({
+          type: 'skip',
+          target: 'track',
+          value: skipReason,
+          temporary: true,
+          track: currentTrack
+        });
+      }
+      const recoveryReasons = new Set(['alarm_start', 'client_error', 'ended', 'stalled', 'trial_clip']);
+      const result = await nextTrack({
+        maxAttempts: recoveryReasons.has(reason || skipReason) ? 8 : 1
+      });
+      if (reason !== 'trial_clip') resetTrialClipNextRequests();
+      return {
+        track: currentTrack,
+        djMessage,
+        queue: getQueueState(),
+        skippedCandidates: result?.skippedCount || 0,
+        playbackNotice: result?.playbackNotice || ''
+      };
+    })()
+  };
+  nextRequestInFlight = inFlight;
+  try {
+    const payload = await inFlight.promise;
+    res.json(payload);
+  } finally {
+    if (nextRequestInFlight === inFlight) nextRequestInFlight = null;
+  }
 });
 
 app.get('/api/queue', (req, res) => {
@@ -1055,6 +1251,7 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
         stage: 'stream',
         reason: 'upstream_stream_error',
         detail: streamError.message,
+        responseClosed: res.destroyed || res.writableEnded,
         hasRange: Boolean(req.headers.range),
         track
       }).catch((failureError) => logger.warn('Playback failure handler error:', failureError.message));
@@ -1146,11 +1343,16 @@ app.post('/api/memory/import', (req, res) => {
 });
 
 app.get('/api/qq-login/status', (req, res) => {
-  res.json(qqLoginManager.getStatus());
+  res.json({
+    ...qqLoginManager.getStatus(),
+    qqCookieHealth: qqmusic.getCookieHealth()
+  });
 });
 
 app.post('/api/qq-login/start', (req, res) => {
-  res.json(qqLoginManager.startLogin());
+  res.json(qqLoginManager.startLogin({
+    onCookieUpdated: () => qqmusic.resetRuntimeState()
+  }));
 });
 
 app.post('/api/qq-login/cancel', (req, res) => {
@@ -1192,7 +1394,38 @@ app.post('/api/chat', async (req, res) => {
     });
   }
 
-  const feedbackAction = feedback.parseFeedback(message, currentTrack);
+  const tuningCommand = recommendationMixer.parseQualityTuningCommand(message);
+  if (tuningCommand) {
+    if (tuningCommand.mood) {
+      activeStationMood = tuningCommand.mood;
+      stats.savePreference('stationMood', activeStationMood);
+    }
+    if (tuningCommand.artistRepeatMode) {
+      activeArtistRepeatMode = tuningCommand.artistRepeatMode;
+      stats.savePreference('artistRepeatMode', activeArtistRepeatMode);
+    }
+    if (tuningCommand.explorationMode) {
+      activeExplorationMode = tuningCommand.explorationMode;
+      stats.savePreference('explorationMode', activeExplorationMode);
+    }
+    if (tuningCommand.djPolicyMode) {
+      activePolicy = djPolicy.clonePolicy(tuningCommand.djPolicyMode);
+      policyPlayCount = 0;
+    }
+    const nextQueue = await rebuildUpcomingQueue();
+    const reply = `${tuningCommand.reply} 当前外部推荐比例约 ${Math.round(currentExternalRecommendationRatio() * 100)}%。`;
+    chatHistory.push({ role: 'user', content: message }, { role: 'assistant', content: reply });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    return res.json({
+      reply,
+      tuning: getStationSettings().tuning,
+      recommendation: getStationSettings().recommendation,
+      djPolicy: activePolicy,
+      queue: nextQueue
+    });
+  }
+
+  const feedbackAction = feedback.parseFeedback(message, currentTrack, { scene: activeScene });
   if (feedbackAction) {
     stats.saveFeedback(feedbackAction);
     const reply = feedbackAction.reply;
@@ -1398,6 +1631,7 @@ async function start() {
 
   const actualPort = await listenWithFallback(PORT);
   activePort = actualPort;
+  writeRuntimeInfo({ port: actualPort, startedAt });
   logger.info(`\n✅ Claudio FM 已启动！`);
   logger.info(`   本地访问：http://localhost:${actualPort}`);
   if (actualPort !== PORT) {

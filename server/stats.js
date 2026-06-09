@@ -1,27 +1,15 @@
-const fs   = require('fs');
 const path = require('path');
+const statsStore = require('./stats-store');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const DB_PATH  = path.join(DATA_DIR, 'stats.json');
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-
 function load() {
-  try {
-    const db = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-    return {
-      plays: Array.isArray(db.plays) ? db.plays : [],
-      prefs: db.prefs || {},
-      feedback: Array.isArray(db.feedback) ? db.feedback : [],
-      dailyBriefings: Array.isArray(db.dailyBriefings) ? db.dailyBriefings : []
-    };
-  } catch {
-    return { plays: [], prefs: {}, feedback: [], dailyBriefings: [] };
-  }
+  return statsStore.loadStats(DB_PATH);
 }
 
 function save(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf8');
+  statsStore.saveStats(DB_PATH, db);
 }
 
 function savePlay(track) {
@@ -105,6 +93,44 @@ function roundRatio(value) {
   return Math.round(value * 100) / 100;
 }
 
+function buildReportLearning({ todayPlays = [], todayFeedback = [], topArtists = [], topCategories = [], externalRatio = 0 } = {}) {
+  if (!todayPlays.length) {
+    return {
+      insights: ['今天还没有足够记录，Claudio 会先保持默认电台策略。'],
+      adjustments: ['继续以你的本地歌单为主，等有反馈后再调整推荐方向。']
+    };
+  }
+
+  const skipCount = todayFeedback.filter((item) => item.type === 'skip').length;
+  const notVibeCount = todayFeedback.filter((item) => item.type === 'not_vibe').length;
+  const topArtist = topArtists[0]?.name;
+  const topCategory = topCategories[0]?.name;
+  const insights = [
+    topArtist
+      ? `今天 Claudio 学到你明显偏向 ${topArtist}。`
+      : '今天 Claudio 学到你的歌手偏好还比较分散。',
+    topCategory
+      ? `今天最稳定的类型信号是「${topCategory}」。`
+      : '今天的类型偏好还不够集中。'
+  ];
+  if (skipCount || notVibeCount) {
+    insights.push(`今天有 ${skipCount + notVibeCount} 次负反馈，会降低相近方向的权重。`);
+  }
+
+  const adjustments = [];
+  if (externalRatio >= 0.5) {
+    adjustments.push('外部推荐命中占比较高，后续可以继续保留一点探索。');
+  } else if (externalRatio > 0) {
+    adjustments.push('外部推荐保持轻量探索，仍以你的本地歌单为主。');
+  } else {
+    adjustments.push('今天主要来自本地歌单，后续会继续稳住熟悉感。');
+  }
+  if (topCategory) {
+    adjustments.push(`后续队列会略微提高「${topCategory}」相关歌曲的排序。`);
+  }
+  return { insights, adjustments };
+}
+
 function buildTodayReport({ now = new Date(), plays = [], feedback = [] } = {}) {
   const start = startOfLocalDay(now);
   const end = start + 24 * 60 * 60;
@@ -112,14 +138,18 @@ function buildTodayReport({ now = new Date(), plays = [], feedback = [] } = {}) 
   const todayFeedback = feedback.filter((item) => item.created_at >= start && item.created_at < end);
   const uniqueSongs = new Set(todayPlays.map(p => `${p.song_name}::${p.artist}`).filter(Boolean));
   const externalCount = todayPlays.filter((play) => play.recommendation_source === 'external').length;
+  const externalRatio = todayPlays.length ? roundRatio(externalCount / todayPlays.length) : 0;
+  const topArtists = topBy(todayPlays, 'artist', 5);
+  const topCategories = topBy(todayPlays, 'category', 5);
+  const learning = buildReportLearning({ todayPlays, todayFeedback, topArtists, topCategories, externalRatio });
   return {
     date: localDateKey(now),
     playCount: todayPlays.length,
     uniqueSongCount: uniqueSongs.size,
     externalCount,
-    externalRatio: todayPlays.length ? roundRatio(externalCount / todayPlays.length) : 0,
-    topArtists: topBy(todayPlays, 'artist', 5),
-    topCategories: topBy(todayPlays, 'category', 5),
+    externalRatio,
+    topArtists,
+    topCategories,
     skippedCategories: topBy(todayFeedback.filter((item) => item.type === 'skip'), 'category', 5),
     feedback: {
       skipCount: todayFeedback.filter((item) => item.type === 'skip').length,
@@ -127,6 +157,8 @@ function buildTodayReport({ now = new Date(), plays = [], feedback = [] } = {}) 
       likeCount: todayFeedback.filter((item) => item.type === 'like').length,
       dislikeCount: todayFeedback.filter((item) => item.type === 'dislike').length
     },
+    insights: learning.insights,
+    adjustments: learning.adjustments,
     recent: todayPlays.slice(0, 12)
   };
 }
@@ -152,10 +184,8 @@ function versionKeywords(name = '') {
   return hits;
 }
 
-function saveFeedback(action) {
-  const db = load();
-  const now = Math.floor(Date.now() / 1000);
-  const entry = {
+function buildFeedbackEntry(action, { now = Math.floor(Date.now() / 1000) } = {}) {
+  return {
     id: Date.now(),
     type: action.type,
     target: action.target || 'track',
@@ -166,35 +196,55 @@ function saveFeedback(action) {
     song_name: action.track?.name || '',
     artist: action.track?.artists?.[0]?.name || action.track?.ar?.[0]?.name || '',
     category: action.track?.categoryName || '',
+    scene_id: action.scene?.id || '',
+    scene_name: action.scene?.name || '',
     created_at: now,
     expires_at: action.temporary ? now + 24 * 60 * 60 : null
   };
+}
+
+function saveFeedback(action) {
+  const db = load();
+  const entry = buildFeedbackEntry(action);
   db.feedback.unshift(entry);
   if (db.feedback.length > 500) db.feedback = db.feedback.slice(0, 500);
   save(db);
   return entry;
 }
 
-function getFeedbackSignals(limit = 200) {
+function sceneMatches(event, scene) {
+  if (!scene?.id) return false;
+  return event.scene_id === scene.id;
+}
+
+function buildFeedbackSignals(events = [], { scene = null, now = Math.floor(Date.now() / 1000) } = {}) {
+  const activeEvents = events.filter(e => !e.expires_at || e.expires_at > now);
+  const sceneEvents = activeEvents.filter(e => sceneMatches(e, scene));
+  return {
+    likedTrackKeys: new Set(activeEvents.filter(e => e.type === 'like' && e.track_key).map(e => e.track_key)),
+    dislikedTrackKeys: new Set(activeEvents.filter(e => e.type === 'dislike' && e.track_key).map(e => e.track_key)),
+    skippedTrackKeys: new Set(activeEvents.filter(e => e.type === 'skip' && e.track_key).map(e => e.track_key)),
+    skippedArtists: new Set(activeEvents.filter(e => e.type === 'skip' && e.artist).map(e => e.artist)),
+    skippedVersionKeywords: new Set(activeEvents
+      .filter(e => e.type === 'skip' && e.song_name)
+      .flatMap(e => versionKeywords(e.song_name))),
+    temporaryReducedTrackKeys: new Set(activeEvents.filter(e => e.type === 'not_vibe' && e.track_key).map(e => e.track_key)),
+    blockedArtists: new Set(activeEvents.filter(e => e.type === 'block' && e.target === 'artist').map(e => e.value)),
+    blockedCategories: new Set(activeEvents.filter(e => e.type === 'block' && e.target === 'category').map(e => e.value)),
+    boostArtists: new Set(activeEvents.filter(e => e.type === 'boost' && e.target === 'artist').map(e => e.value)),
+    reduceArtists: new Set(activeEvents.filter(e => e.type === 'reduce' && e.target === 'artist').map(e => e.value)),
+    sceneReducedTrackKeys: new Set(sceneEvents.filter(e => e.type === 'scene_reduce' && e.track_key).map(e => e.track_key)),
+    sceneBoostedTrackKeys: new Set(sceneEvents.filter(e => e.type === 'scene_boost' && e.track_key).map(e => e.track_key)),
+    events: activeEvents
+  };
+}
+
+function getFeedbackSignals(limit = 200, options = {}) {
   const now = Math.floor(Date.now() / 1000);
   const events = load().feedback
     .filter(e => !e.expires_at || e.expires_at > now)
     .slice(0, limit);
-  return {
-    likedTrackKeys: new Set(events.filter(e => e.type === 'like' && e.track_key).map(e => e.track_key)),
-    dislikedTrackKeys: new Set(events.filter(e => e.type === 'dislike' && e.track_key).map(e => e.track_key)),
-    skippedTrackKeys: new Set(events.filter(e => e.type === 'skip' && e.track_key).map(e => e.track_key)),
-    skippedArtists: new Set(events.filter(e => e.type === 'skip' && e.artist).map(e => e.artist)),
-    skippedVersionKeywords: new Set(events
-      .filter(e => e.type === 'skip' && e.song_name)
-      .flatMap(e => versionKeywords(e.song_name))),
-    temporaryReducedTrackKeys: new Set(events.filter(e => e.type === 'not_vibe' && e.track_key).map(e => e.track_key)),
-    blockedArtists: new Set(events.filter(e => e.type === 'block' && e.target === 'artist').map(e => e.value)),
-    blockedCategories: new Set(events.filter(e => e.type === 'block' && e.target === 'category').map(e => e.value)),
-    boostArtists: new Set(events.filter(e => e.type === 'boost' && e.target === 'artist').map(e => e.value)),
-    reduceArtists: new Set(events.filter(e => e.type === 'reduce' && e.target === 'artist').map(e => e.value)),
-    events
-  };
+  return buildFeedbackSignals(events, { ...options, now });
 }
 
 function isTrackBlocked(track) {
@@ -240,6 +290,10 @@ function getPreference(key, fallback = null) {
   return load().prefs[key] ?? fallback;
 }
 
+function getStorageReport() {
+  return statsStore.storageReport(DB_PATH, load());
+}
+
 module.exports = {
   savePlay,
   getRecentPlays,
@@ -249,9 +303,12 @@ module.exports = {
   buildTodayReport,
   savePreference,
   getPreference,
+  buildFeedbackEntry,
+  buildFeedbackSignals,
   saveFeedback,
   getFeedbackSignals,
   isTrackBlocked,
   saveDailyBriefing,
-  getDailyBriefing
+  getDailyBriefing,
+  getStorageReport
 };

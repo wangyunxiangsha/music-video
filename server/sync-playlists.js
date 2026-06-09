@@ -10,6 +10,7 @@ const { spawn } = require('child_process');
 const path      = require('path');
 const fs        = require('fs');
 const axios     = require('axios');
+const importer  = require('./import');
 
 const NCM_PORT = process.env.NCM_PORT || 3001;
 const NCM_BASE = `http://127.0.0.1:${NCM_PORT}`;
@@ -260,6 +261,7 @@ function formatQQSong(s) {
   const mid = s.mid || s.songmid || '';
   return {
     mid,
+    mediaMid: s.file?.media_mid || s.strMediaMid || s.media_mid || '',
     name: s.name || s.title || s.songname || '',
     artists: (s.singer || s.ar || []).map(a => a.name).filter(Boolean),
     album: s.album?.name || s.albumname || ''
@@ -269,13 +271,16 @@ function formatQQSong(s) {
 // ─── Save Data ────────────────────────────────────────────────────────────────
 function saveData(netease, qq) {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const data = {
-    lastUpdated: new Date().toISOString(),
+  const existing = importer.loadLocal() || {};
+  const { data, summary } = importer.mergeImportedPlaylists(existing, {
     netease: { playlists: netease },
-    qq:      { playlists: qq }
-  };
+    qq: { playlists: qq }
+  });
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
   ok(`已保存到 ${DATA_FILE}`);
+  ok(`增量同步：网易云 +${summary.netease.addedSongs} / 更新 ${summary.netease.updatedSongs} / 移除 ${summary.netease.removedSongs}`);
+  ok(`增量同步：QQ音乐 +${summary.qq.addedSongs} / 更新 ${summary.qq.updatedSongs} / 移除 ${summary.qq.removedSongs}`);
+  ok(`保留 Claudio 收藏 ${summary.preservedClaudioSongs} 首，屏蔽 ${summary.preservedRemovedTracks} 首`);
   return data;
 }
 
@@ -288,11 +293,13 @@ async function generateTaste(data) {
 
   const allSongs = [
     ...data.netease.playlists.flatMap(p => p.songs),
-    ...data.qq.playlists.flatMap(p => p.songs)
+    ...data.qq.playlists.flatMap(p => p.songs),
+    ...(data.claudio?.playlists || []).flatMap(p => p.songs || [])
   ];
   const playlistNames = [
     ...data.netease.playlists.map(p => p.name),
-    ...data.qq.playlists.map(p => p.name)
+    ...data.qq.playlists.map(p => p.name),
+    ...(data.claudio?.playlists || []).map(p => p.name)
   ].filter(Boolean);
 
   const artistCount = {};

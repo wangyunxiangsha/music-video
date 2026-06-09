@@ -9,7 +9,8 @@ assert.match(app, /lastProgressAt/);
 assert.match(app, /audio\.onwaiting/);
 assert.match(app, /audio\.onstalled/);
 assert.match(app, /setInterval\(\(\) => \{/);
-assert.match(app, /播放卡住了，马上换下一首/);
+assert.match(app, /播放卡住，已自动换歌/);
+assert.match(app, /showPlaybackNotice/);
 assert.doesNotMatch(app, /stationStatus\.textContent = v \? 'Speaking\.\.\.' : 'Standby'/);
 
 console.log('playback watchdog tests passed');

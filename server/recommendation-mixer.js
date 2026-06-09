@@ -8,6 +8,39 @@ function normalizeText(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
 }
 
+function editDistance(a, b) {
+  const left = Array.from(normalizeText(a));
+  const right = Array.from(normalizeText(b));
+  const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
+  for (let i = 0; i <= left.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= right.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= left.length; i++) {
+    for (let j = 1; j <= right.length; j++) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[left.length][right.length];
+}
+
+function titleOf(track) {
+  return track?.name || track?.songname || track?.title || '';
+}
+
+function titleMatches(track, titleHint) {
+  const hint = normalizeText(titleHint);
+  const title = normalizeText(titleOf(track));
+  if (!hint) return true;
+  if (!title) return false;
+  if (title.includes(hint) || hint.includes(title)) return true;
+  const minLength = Math.min(Array.from(title).length, Array.from(hint).length);
+  return minLength >= 4 && editDistance(title, hint) <= 1;
+}
+
 function artistMatches(track, artistHint) {
   const hint = normalizeText(artistHint);
   if (!hint) return true;
@@ -130,6 +163,73 @@ function parseExplorationCommand(message) {
   return null;
 }
 
+function parseQualityTuningCommand(message) {
+  const text = String(message || '').trim();
+  if (!text) return null;
+  if (/(安静一点|安静些|低刺激|柔和一点|别太吵)/.test(text)) {
+    return {
+      mood: 'quiet',
+      explorationMode: 'conservative',
+      djPolicyMode: 'minimal',
+      reply: '好，我会安静一点，少说少折腾，主要放更稳的歌。'
+    };
+  }
+  if (/(热闹一点|来点热闹|提神一点|活跃一点|嗨一点)/.test(text)) {
+    return {
+      mood: 'lively',
+      explorationMode: 'discovery',
+      djPolicyMode: 'short',
+      reply: '好，接下来热闹一点，多一点新鲜和提神的歌。'
+    };
+  }
+  if (/(少放重复歌手|歌手别重复|换些不同歌手|别老同一个歌手)/.test(text)) {
+    return {
+      artistRepeatMode: 'less',
+      reply: '收到，后面会更注意分散歌手，少让重复歌手挤在一起。'
+    };
+  }
+  if (/(恢复默认调音|默认调音|恢复默认口味|正常调音)/.test(text)) {
+    return {
+      mood: 'balanced',
+      artistRepeatMode: 'normal',
+      explorationMode: 'balanced',
+      reply: '好，恢复默认调音。'
+    };
+  }
+  return null;
+}
+
+function tasteWeightForTrack({
+  track,
+  tasteSignals = {},
+  feedbackSignals = {},
+  topArtists = new Set((tasteSignals.topArtists || []).map(i => i.name)),
+  topCategories = new Set((tasteSignals.topCategories || []).map(i => i.name)),
+  recentArtists = new Set(),
+  artistRepeatMode = 'normal'
+} = {}) {
+  const artist = artistOf(track);
+  const trackKeyValue = `${String(track?.name || '').trim().toLowerCase()}::${String(artist).trim().toLowerCase()}`;
+  const versionText = `${track?.name || ''} ${track?.album?.name || track?.al?.name || ''}`.toLowerCase();
+  let weight = 1;
+  if (topArtists.has(artist)) weight += 0.8;
+  if (track?.categoryName && topCategories.has(track.categoryName)) weight += 0.5;
+  if (feedbackSignals.likedTrackKeys?.has(trackKeyValue)) weight += 2;
+  if (feedbackSignals.skippedTrackKeys?.has(trackKeyValue)) weight -= 1.2;
+  if (feedbackSignals.skippedArtists?.has(artist)) weight -= 0.5;
+  for (const keyword of feedbackSignals.skippedVersionKeywords || []) {
+    if (versionText.includes(keyword)) weight -= 0.4;
+  }
+  if (feedbackSignals.temporaryReducedTrackKeys?.has(trackKeyValue)) weight -= 0.8;
+  if (feedbackSignals.boostArtists?.has(artist)) weight += 1.5;
+  if (feedbackSignals.reduceArtists?.has(artist)) weight -= 0.7;
+  if (feedbackSignals.sceneReducedTrackKeys?.has(trackKeyValue)) weight -= 1.6;
+  if (feedbackSignals.sceneBoostedTrackKeys?.has(trackKeyValue)) weight += 1.2;
+  if ((tasteSignals.recentSongs || []).includes(track?.name)) weight -= 0.9;
+  if (artistRepeatMode === 'less' && recentArtists.has(artist)) weight -= 1.1;
+  return weight;
+}
+
 const BAD_EXTERNAL_VERSION_RE = /(live|现场|演唱会|伴奏|翻唱|cover|remix|dj|片段|剪辑|铃声|karaoke|纯伴奏)/i;
 
 function isCleanExternalCandidate(track) {
@@ -150,6 +250,11 @@ function preferCleanVersions(items = []) {
 function preferArtistMatches(items = [], artistHint = '') {
   if (!artistHint) return items || [];
   return (items || []).filter(item => artistMatches(item, artistHint));
+}
+
+function preferTitleMatches(items = [], titleHint = '') {
+  if (!titleHint) return items || [];
+  return (items || []).filter(item => titleMatches(item, titleHint));
 }
 
 function preferOriginalArtist(items = [], songName = '') {
@@ -253,8 +358,12 @@ module.exports = {
   resolveExternalRecommendationRatio,
   ratioForExplorationMode,
   parseExplorationCommand,
+  parseQualityTuningCommand,
+  tasteWeightForTrack,
   isCleanExternalCandidate,
   preferCleanVersions,
+  preferTitleMatches,
+  titleMatches,
   preferArtistMatches,
   artistMatches,
   originalArtistForSong,

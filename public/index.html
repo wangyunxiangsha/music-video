@@ -104,9 +104,11 @@
 
       <div class="controls">
         <button id="btn-like" class="feedback-btn" title="喜欢这首">LIKE</button>
+        <button id="btn-save-local" class="feedback-btn library-btn" title="把外部推荐加入本地歌单池" disabled>SAVE</button>
         <button id="btn-prev" title="重播 / 上一首">‹</button>
         <button id="btn-play" title="播放 / 暂停">▶</button>
         <button id="btn-next" title="下一首">›</button>
+        <button id="btn-remove-local" class="feedback-btn library-btn danger" title="从本地歌单池删除并永久屏蔽" disabled>REMOVE</button>
         <button id="btn-dislike" class="feedback-btn" title="少放这首">LESS</button>
       </div>
 
@@ -164,6 +166,8 @@
       <p id="dj-text">欢迎收听 Claudio FM，你的个人 AI 电台<span class="cursor"></span></p>
     </div>
 
+    <div class="playback-notice" id="playback-notice" aria-live="polite" role="status"></div>
+
     <!-- Chat Panel (hidden by default) -->
     <div class="chat" id="chat" style="display:none">
       <div class="chat-msgs" id="chat-msgs">
@@ -217,6 +221,42 @@
         </div>
         <p id="memory-status" class="memory-status" aria-live="polite"></p>
       </div>
+      <div class="sleep-panel">
+        <div class="sleep-head">
+          <span>SLEEP</span>
+          <strong>睡眠定时</strong>
+        </div>
+        <div class="sleep-actions">
+          <button type="button" data-sleep-minutes="15">15</button>
+          <button type="button" data-sleep-minutes="30">30</button>
+          <button type="button" data-sleep-minutes="45">45</button>
+          <button type="button" data-sleep-minutes="60">60</button>
+          <button type="button" id="sleep-off">OFF</button>
+        </div>
+        <p id="sleep-status" class="sleep-status" aria-live="polite">未开启</p>
+      </div>
+      <div class="alarm-panel">
+        <div class="alarm-head">
+          <span>ALARM</span>
+          <strong>闹钟电台</strong>
+        </div>
+        <div class="alarm-actions">
+          <input id="alarm-time" type="time" aria-label="闹钟时间">
+          <button id="alarm-on" type="button">ON</button>
+          <button id="alarm-off" type="button">OFF</button>
+        </div>
+        <p id="alarm-status" class="alarm-status" aria-live="polite">未开启</p>
+      </div>
+      <div class="blocked-panel">
+        <div class="blocked-head">
+          <span>BLOCKED</span>
+          <strong>屏蔽歌曲</strong>
+          <button id="blocked-refresh" type="button">刷新</button>
+        </div>
+        <div id="blocked-list" class="blocked-list">
+          <p class="blocked-empty">暂无屏蔽歌曲</p>
+        </div>
+      </div>
       <div class="qq-login-panel">
         <div class="qq-login-head">
           <span>QQ LOGIN</span>
@@ -237,7 +277,6 @@
       <button id="btn-tts" title="语音播报" class="active">VOICE</button>
       <button id="btn-lyric" title="查看歌词">LYRIC</button>
       <button id="btn-history" title="播放历史">HIST</button>
-      <button id="btn-save-local" title="把外部推荐加入本地歌单池" disabled>SAVE</button>
       <button id="btn-settings" title="电台设置">SET</button>
     </footer>
 

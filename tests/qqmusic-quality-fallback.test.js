@@ -1,6 +1,8 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+
+process.env.QQ_MUSIC_COOKIE = 'uin=o123; qqmusic_key=test-key; qm_keyst=test-key';
 const qqmusic = require('../server/qqmusic');
 
 assert.deepStrictEqual(
@@ -42,6 +44,40 @@ assert.strictEqual(
   qqmusic.buildQQFilename('0018C4LJ40te4R', '', 'M800', 'mp3'),
   'M8000018C4LJ40te4R.mp3'
 );
+
+qqmusic.resetCookieHealth();
+assert.strictEqual(qqmusic.getCookieHealth().suspectedExpired, false);
+for (let i = 0; i < 3; i++) {
+  qqmusic.recordCookieHealthFromAttempts([
+    { quality: 'M800', reason: 'empty purl' },
+    { quality: 'M500', reason: 'empty purl' },
+    { quality: 'C400', reason: 'empty purl' },
+    { quality: 'M128', reason: 'empty purl' },
+    { quality: 'C128', reason: 'empty purl' }
+  ]);
+}
+assert.strictEqual(qqmusic.getCookieHealth().suspectedExpired, true);
+assert.match(qqmusic.getCookieHealth().message, /疑似过期，请扫码刷新/);
+
+qqmusic.resetCookieHealth();
+qqmusic.recordCookieHealthFromAttempts([
+  { quality: 'M800', reason: 'CDN HTTP 404' },
+  { quality: 'M500', reason: 'empty purl' }
+]);
+assert.strictEqual(qqmusic.getCookieHealth().suspectedExpired, false);
+
+for (let i = 0; i < 3; i++) {
+  qqmusic.recordCookieHealthFromAttempts([
+    { quality: 'M800', reason: 'empty purl' },
+    { quality: 'M500', reason: 'empty purl' },
+    { quality: 'C400', reason: 'empty purl' },
+    { quality: 'M128', reason: 'empty purl' },
+    { quality: 'C128', reason: 'empty purl' }
+  ]);
+}
+assert.strictEqual(qqmusic.getCookieHealth().suspectedExpired, true);
+qqmusic.resetRuntimeState();
+assert.strictEqual(qqmusic.getCookieHealth().suspectedExpired, false);
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'server', 'qqmusic.js'), 'utf8');
 assert.match(source, /qualityAttempts\.push/);

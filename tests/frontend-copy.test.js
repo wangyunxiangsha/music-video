@@ -7,6 +7,6 @@ const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf
 assert.doesNotMatch(app, /没有可播放的版权/);
 assert.doesNotMatch(app, /暂时没有可播放版权/);
 assert.match(app, /当前音源暂时打不开/);
-assert.match(app, /已跳过/);
+assert.match(app, /已自动换歌/);
 
 console.log('frontend copy tests passed');

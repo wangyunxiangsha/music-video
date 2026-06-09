@@ -29,6 +29,160 @@ function saveLocal(data, options = {}) {
   fs.writeFileSync(dataFile, JSON.stringify(data, null, 2), 'utf8');
 }
 
+function ensureLocalShape(data = {}) {
+  data.netease = data.netease || { playlists: [] };
+  data.qq = data.qq || { playlists: [] };
+  data.claudio = data.claudio || { playlists: [] };
+  data.netease.playlists = Array.isArray(data.netease.playlists) ? data.netease.playlists : [];
+  data.qq.playlists = Array.isArray(data.qq.playlists) ? data.qq.playlists : [];
+  data.claudio.playlists = Array.isArray(data.claudio.playlists) ? data.claudio.playlists : [];
+  data.claudio.removedTracks = Array.isArray(data.claudio.removedTracks) ? data.claudio.removedTracks : [];
+  return data;
+}
+
+function trackKey(track = {}) {
+  const source = track.source || (track.mid || String(track.id || '').startsWith('qq:') ? 'qq' : 'netease');
+  if (source === 'qq') {
+    const mid = track.mid || track._qqmid || String(track.id || '').replace(/^qq:/, '');
+    return mid ? `qq:${mid}` : '';
+  }
+  const id = track.id || track._neteaseId || '';
+  return id ? `netease:${id}` : '';
+}
+
+function removedTrackKeys(data = {}) {
+  return new Set((data.claudio?.removedTracks || []).map(item => item.key).filter(Boolean));
+}
+
+function listRemovedTracks(options = {}) {
+  const data = ensureLocalShape(loadLocal(options) || {});
+  return [...data.claudio.removedTracks].sort((a, b) => String(b.removedAt || '').localeCompare(String(a.removedAt || '')));
+}
+
+function restoreRemovedTrack(key, options = {}) {
+  if (!key) return { ok: false, reason: '缺少屏蔽歌曲 key' };
+  const data = ensureLocalShape(loadLocal(options) || {});
+  const before = data.claudio.removedTracks.length;
+  const restored = data.claudio.removedTracks.find(item => item.key === key);
+  data.claudio.removedTracks = data.claudio.removedTracks.filter(item => item.key !== key);
+  if (data.claudio.removedTracks.length === before) {
+    return { ok: false, reason: '这首歌不在屏蔽列表' };
+  }
+  data.lastUpdated = new Date().toISOString();
+  saveLocal(data, options);
+  return { ok: true, restored };
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function normalizePlaylist(playlist = {}) {
+  const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
+  return {
+    ...playlist,
+    id: String(playlist.id || ''),
+    name: playlist.name || String(playlist.id || ''),
+    songs,
+    songCount: songs.length
+  };
+}
+
+function playlistsById(playlists = []) {
+  return new Map((playlists || []).map(playlist => [String(playlist.id || ''), normalizePlaylist(playlist)]));
+}
+
+function comparableSong(song = {}) {
+  return JSON.stringify({
+    id: song.id || '',
+    mid: song.mid || '',
+    mediaMid: song.mediaMid || '',
+    name: song.name || '',
+    artists: song.artists || [],
+    album: song.album || ''
+  });
+}
+
+function summarizePlatformMerge(existingPlaylists = [], incomingPlaylists = []) {
+  const existingById = playlistsById(existingPlaylists);
+  const incomingById = playlistsById(incomingPlaylists);
+  const summary = {
+    playlistsAdded: 0,
+    playlistsRemoved: 0,
+    addedSongs: 0,
+    updatedSongs: 0,
+    removedSongs: 0
+  };
+
+  for (const [playlistId, incoming] of incomingById.entries()) {
+    const previous = existingById.get(playlistId);
+    if (!previous) {
+      summary.playlistsAdded += 1;
+      summary.addedSongs += incoming.songs.length;
+      continue;
+    }
+
+    const previousSongs = new Map((previous.songs || []).map(song => [trackKey(song), song]).filter(([key]) => key));
+    const incomingKeys = new Set();
+    for (const song of incoming.songs || []) {
+      const key = trackKey(song);
+      if (!key) continue;
+      incomingKeys.add(key);
+      const previousSong = previousSongs.get(key);
+      if (!previousSong) {
+        summary.addedSongs += 1;
+      } else if (comparableSong(previousSong) !== comparableSong(song)) {
+        summary.updatedSongs += 1;
+      }
+    }
+
+    for (const [key] of previousSongs.entries()) {
+      if (!incomingKeys.has(key)) summary.removedSongs += 1;
+    }
+  }
+
+  for (const [playlistId, previous] of existingById.entries()) {
+    if (!incomingById.has(playlistId)) {
+      summary.playlistsRemoved += 1;
+      summary.removedSongs += (previous.songs || []).length;
+    }
+  }
+
+  return summary;
+}
+
+function mergeImportedPlaylists(existing = {}, imported = {}) {
+  const current = ensureLocalShape(cloneJson(existing));
+  const data = {
+    ...current,
+    lastUpdated: new Date().toISOString(),
+    netease: { playlists: current.netease.playlists },
+    qq: { playlists: current.qq.playlists },
+    claudio: current.claudio
+  };
+
+  const summary = {
+    netease: summarizePlatformMerge(current.netease.playlists, current.netease.playlists),
+    qq: summarizePlatformMerge(current.qq.playlists, current.qq.playlists),
+    preservedClaudioSongs: current.claudio.playlists.reduce((sum, playlist) => sum + (playlist.songs || []).length, 0),
+    preservedRemovedTracks: current.claudio.removedTracks.length
+  };
+
+  if (imported.netease?.playlists) {
+    const playlists = imported.netease.playlists.map(normalizePlaylist);
+    summary.netease = summarizePlatformMerge(current.netease.playlists, playlists);
+    data.netease = { playlists };
+  }
+
+  if (imported.qq?.playlists) {
+    const playlists = imported.qq.playlists.map(normalizePlaylist);
+    summary.qq = summarizePlatformMerge(current.qq.playlists, playlists);
+    data.qq = { playlists };
+  }
+
+  return { data: ensureLocalShape(data), summary };
+}
+
 // ─── Netease ───────────────────────────────────────────────────────────────────
 async function importNetease(music) {
   const log = [];
@@ -110,25 +264,31 @@ async function importAll(music, qqmusic) {
     importQQ(qqmusic)
   ]);
 
-  const data = {
-    lastUpdated: new Date().toISOString(),
-    netease: { playlists: netease.playlists },
-    qq:      { playlists: qq.playlists },
-    claudio: existing.claudio || { playlists: [] }
-  };
+  const { data, summary } = mergeImportedPlaylists(existing, {
+    netease: netease.ok ? { playlists: netease.playlists } : null,
+    qq: qq.ok ? { playlists: qq.playlists } : null
+  });
   saveLocal(data);
 
   const totalSongs = [
-    ...netease.playlists.flatMap(p => p.songs),
-    ...qq.playlists.flatMap(p => p.songs)
+    ...data.netease.playlists.flatMap(p => p.songs),
+    ...data.qq.playlists.flatMap(p => p.songs),
+    ...data.claudio.playlists.flatMap(p => p.songs || [])
+  ];
+  const summaryLog = [
+    '',
+    `增量同步：网易云 +${summary.netease.addedSongs} / 更新 ${summary.netease.updatedSongs} / 移除 ${summary.netease.removedSongs}`,
+    `增量同步：QQ音乐 +${summary.qq.addedSongs} / 更新 ${summary.qq.updatedSongs} / 移除 ${summary.qq.removedSongs}`,
+    `保留 Claudio 收藏 ${summary.preservedClaudioSongs} 首，屏蔽 ${summary.preservedRemovedTracks} 首`
   ];
 
   return {
     ok: netease.ok || qq.ok,
-    log: [...netease.log, '', ...qq.log],
+    log: [...netease.log, '', ...qq.log, ...summaryLog],
     neteaseCount: netease.playlists.length,
     qqCount:      qq.playlists.length,
-    totalSongs:   totalSongs.length
+    totalSongs:   totalSongs.length,
+    syncSummary: summary
   };
 }
 
@@ -167,8 +327,9 @@ function buildTasteData() {
 
 // ─── Build shuffled playlist pool from local data ─────────────────────────────
 function buildPlaylistPool(options = {}) {
-  const local = loadLocal(options);
+  const local = ensureLocalShape(loadLocal(options) || {});
   if (!local) return [];
+  const blocked = removedTrackKeys(local);
 
   const neteaseSongs = (local.netease?.playlists || []).flatMap(p =>
     p.songs.map(s => ({ id: s.id, name: s.name, artists: s.artists.map(n => ({ name: n })), album: { name: s.album }, privilege: { pl: 1 } }))
@@ -208,7 +369,12 @@ function buildPlaylistPool(options = {}) {
 
   // Deduplicate
   const seen = new Set();
-  const unique = [...neteaseSongs, ...qqSongs, ...claudioSongs].filter(s => { if (!s.id || seen.has(s.id)) return false; seen.add(s.id); return true; });
+  const unique = [...neteaseSongs, ...qqSongs, ...claudioSongs].filter(s => {
+    const key = trackKey(s);
+    if (!s.id || !key || blocked.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
   // Shuffle
   for (let i = unique.length - 1; i > 0; i--) {
@@ -220,16 +386,12 @@ function buildPlaylistPool(options = {}) {
 
 function addTrackToLocalPool(track, options = {}) {
   if (!track?.id || !track?.name) return { ok: false, reason: '缺少歌曲信息' };
-  const data = loadLocal(options) || {
+  const data = ensureLocalShape(loadLocal(options) || {
     lastUpdated: new Date().toISOString(),
     netease: { playlists: [] },
     qq: { playlists: [] },
     claudio: { playlists: [] }
-  };
-  data.netease = data.netease || { playlists: [] };
-  data.qq = data.qq || { playlists: [] };
-  data.claudio = data.claudio || { playlists: [] };
-  data.claudio.playlists = Array.isArray(data.claudio.playlists) ? data.claudio.playlists : [];
+  });
 
   let playlist = data.claudio.playlists.find(item => item.id === 'claudio-saved');
   if (!playlist) {
@@ -257,13 +419,16 @@ function addTrackToLocalPool(track, options = {}) {
         source
       };
 
-  const key = source === 'qq' ? `qq:${song.mid}` : String(song.id);
+  const key = trackKey(song);
+  data.claudio.removedTracks = data.claudio.removedTracks.filter(item => item.key !== key);
   const exists = playlist.songs.some(item => {
-    const itemSource = item.source || (item.mid ? 'qq' : 'netease');
-    const itemKey = itemSource === 'qq' ? `qq:${item.mid}` : String(item.id);
-    return itemKey === key;
+    return trackKey(item) === key;
   });
-  if (exists) return { ok: true, added: false, playlistName: playlist.name, song };
+  if (exists) {
+    data.lastUpdated = new Date().toISOString();
+    saveLocal(data, options);
+    return { ok: true, added: false, playlistName: playlist.name, song };
+  }
 
   playlist.songs.unshift(song);
   playlist.songCount = playlist.songs.length;
@@ -272,4 +437,52 @@ function addTrackToLocalPool(track, options = {}) {
   return { ok: true, added: true, playlistName: playlist.name, song };
 }
 
-module.exports = { importAll, buildTasteData, buildPlaylistPool, loadLocal, addTrackToLocalPool };
+function removeSongFromPlaylist(playlist, key) {
+  const songs = Array.isArray(playlist.songs) ? playlist.songs : [];
+  const before = songs.length;
+  playlist.songs = songs.filter(song => trackKey(song) !== key);
+  playlist.songCount = playlist.songs.length;
+  return before - playlist.songs.length;
+}
+
+function removeTrackFromLocalPool(track, options = {}) {
+  const key = trackKey(track);
+  if (!key) return { ok: false, reason: '缺少歌曲信息' };
+  const data = ensureLocalShape(loadLocal(options) || {
+    lastUpdated: new Date().toISOString(),
+    netease: { playlists: [] },
+    qq: { playlists: [] },
+    claudio: { playlists: [] }
+  });
+
+  let removedCount = 0;
+  for (const playlist of data.netease.playlists) removedCount += removeSongFromPlaylist(playlist, key);
+  for (const playlist of data.qq.playlists) removedCount += removeSongFromPlaylist(playlist, key);
+  for (const playlist of data.claudio.playlists) removedCount += removeSongFromPlaylist(playlist, key);
+
+  if (!data.claudio.removedTracks.some(item => item.key === key)) {
+    data.claudio.removedTracks.unshift({
+      key,
+      name: track.name || '',
+      artist: (track.artists || track.ar || []).map(item => item.name || item).filter(Boolean).join('/'),
+      removedAt: new Date().toISOString()
+    });
+  }
+
+  data.lastUpdated = new Date().toISOString();
+  saveLocal(data, options);
+  return { ok: true, removed: removedCount > 0, removedCount, key };
+}
+
+module.exports = {
+  importAll,
+  mergeImportedPlaylists,
+  buildTasteData,
+  buildPlaylistPool,
+  loadLocal,
+  listRemovedTracks,
+  addTrackToLocalPool,
+  removeTrackFromLocalPool,
+  restoreRemovedTrack,
+  trackKey
+};

@@ -58,10 +58,12 @@
   const btnLyric  = $('btn-lyric');
   const btnHistory= $('btn-history');
   const btnSaveLocal = $('btn-save-local');
+  const btnRemoveLocal = $('btn-remove-local');
   const btnSettings = $('btn-settings');
   const statusScene = $('status-scene');
   const statusRatio = $('status-ratio');
   const statusDj = $('status-dj');
+  const playbackNotice = $('playback-notice');
   const settingsPanel = $('settings-panel');
   const settingExternalEnabled = $('setting-external-enabled');
   const settingExternalRatio = $('setting-external-ratio');
@@ -72,6 +74,14 @@
   const memoryImport = $('memory-import');
   const memoryImportFile = $('memory-import-file');
   const memoryStatus = $('memory-status');
+  const sleepStatus = $('sleep-status');
+  const sleepOff = $('sleep-off');
+  const alarmTime = $('alarm-time');
+  const alarmOn = $('alarm-on');
+  const alarmOff = $('alarm-off');
+  const alarmStatus = $('alarm-status');
+  const blockedList = $('blocked-list');
+  const blockedRefresh = $('blocked-refresh');
   const qqLoginStart = $('qq-login-start');
   const qqLoginCancel = $('qq-login-cancel');
   const qqLoginQr = $('qq-login-qr');
@@ -194,6 +204,10 @@
       return;
     }
     const feedback = data.feedback || {};
+    const learningItems = [
+      ...(Array.isArray(data.insights) ? data.insights : []),
+      ...(Array.isArray(data.adjustments) ? data.adjustments : [])
+    ].slice(0, 4);
     const metrics = [
       ['播放', data.playCount || 0],
       ['去重', data.uniqueSongCount || 0],
@@ -217,6 +231,9 @@
         <span>歌手 ${escapeHtml(topName(data.topArtists))}</span>
         <span>类型 ${escapeHtml(topName(data.topCategories))}</span>
         <span>不对味 ${escapeHtml(feedback.notVibeCount || 0)}</span>
+      </div>
+      <div class="today-report-learning">
+        ${learningItems.map(item => `<span>${escapeHtml(item)}</span>`).join('')}
       </div>
     `;
   }
@@ -312,8 +329,10 @@
   }
 
   function renderStationStatus(settings = S.settings) {
-    const scene = settings?.scene?.name || '默认电台';
-    const policy = settings?.djPolicy?.name || '正常播报';
+    const scene = settings?.scene?.name || settings?.effectiveScene?.name || '默认电台';
+    const policy = settings?.scene?.name
+      ? (settings?.djPolicy?.name || '正常播报')
+      : (settings?.effectiveDjPolicy?.name || settings?.djPolicy?.name || '正常播报');
     const rec = settings?.recommendation || {};
     const ratio = rec.externalEnabled === false ? 'OFF' : ratioLabel(rec.externalRatio);
     if (statusScene) statusScene.textContent = scene;
@@ -348,11 +367,21 @@
     btnSaveLocal.title = external ? '把这首外部推荐加入本地歌单池' : '当前歌曲已在本地歌单池';
   }
 
+  function updateRemoveLocalButton() {
+    if (!btnRemoveLocal) return;
+    const source = S.track?.recommendationSource;
+    const removable = Boolean(S.track) && source !== 'external' && source !== 'removed';
+    btnRemoveLocal.disabled = !removable;
+    btnRemoveLocal.textContent = 'REMOVE';
+    btnRemoveLocal.title = removable ? '从本地歌单池删除并永久屏蔽' : '外部推荐不在本地歌单池';
+  }
+
   async function loadSettings() {
     try {
       const res = await fetch('/api/settings');
       const settings = await res.json();
       renderSettingsPanel(settings);
+      loadBlockedTracks();
     } catch {
       renderStationStatus(S.settings);
     }
@@ -368,6 +397,204 @@
     if (data.settings) renderSettingsPanel(data.settings);
     if (data.queue) renderQueue(data.queue);
     return data;
+  }
+
+  let sleepTimer = null;
+  let sleepFadeTimer = null;
+  let sleepEndsAt = 0;
+  let sleepBaseVolume = 0.8;
+
+  function setSleepStatus(text) {
+    if (sleepStatus) sleepStatus.textContent = text || '未开启';
+  }
+
+  function cancelSleepTimer() {
+    const hadTimer = Boolean(sleepTimer || sleepFadeTimer || sleepEndsAt);
+    if (sleepTimer) clearInterval(sleepTimer);
+    if (sleepFadeTimer) clearInterval(sleepFadeTimer);
+    sleepTimer = null;
+    sleepFadeTimer = null;
+    sleepEndsAt = 0;
+    if (hadTimer) setVolume(sleepBaseVolume);
+    setSleepStatus('未开启');
+  }
+
+  function beginSleepFade() {
+    if (sleepTimer) clearInterval(sleepTimer);
+    sleepTimer = null;
+    if (sleepFadeTimer) clearInterval(sleepFadeTimer);
+    const startVolume = audio.volume;
+    const fadeMs = 30000;
+    const started = Date.now();
+    setSleepStatus('正在渐弱停止...');
+    sleepFadeTimer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - started) / fadeMs);
+      setVolume(startVolume * (1 - progress));
+      if (progress >= 1) {
+        clearInterval(sleepFadeTimer);
+        sleepFadeTimer = null;
+        audio.pause();
+        setVolume(sleepBaseVolume);
+        setSleepStatus('已停止');
+      }
+    }, 1000);
+  }
+
+  function renderSleepCountdown() {
+    const remainingMs = sleepEndsAt - Date.now();
+    if (remainingMs <= 0) {
+      beginSleepFade();
+      return;
+    }
+    const minutes = Math.ceil(remainingMs / 60000);
+    setSleepStatus(`${minutes} 分钟后渐弱停止`);
+  }
+
+  function startSleepTimer(minutes) {
+    const value = Number(minutes);
+    if (!value) return;
+    if (sleepTimer) clearInterval(sleepTimer);
+    if (sleepFadeTimer) clearInterval(sleepFadeTimer);
+    sleepBaseVolume = audio.volume;
+    sleepEndsAt = Date.now() + value * 60000;
+    renderSleepCountdown();
+    sleepTimer = setInterval(renderSleepCountdown, 1000);
+  }
+
+  let alarmTimer = null;
+  let alarmFadeTimer = null;
+  let alarmTargetTime = '';
+  let alarmTargetVolume = 0.8;
+
+  function setAlarmStatus(text) {
+    if (alarmStatus) alarmStatus.textContent = text || '未开启';
+  }
+
+  function minutesUntilTime(timeValue) {
+    const match = /^(\d{2}):(\d{2})$/.exec(timeValue || '');
+    if (!match) return null;
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(Number(match[1]), Number(match[2]), 0, 0);
+    if (target <= now) target.setDate(target.getDate() + 1);
+    return Math.ceil((target - now) / 60000);
+  }
+
+  function cancelAlarmTimer() {
+    if (alarmTimer) clearInterval(alarmTimer);
+    if (alarmFadeTimer) clearInterval(alarmFadeTimer);
+    alarmTimer = null;
+    alarmFadeTimer = null;
+    alarmTargetTime = '';
+    setAlarmStatus('未开启');
+  }
+
+  function beginAlarmFadeIn() {
+    if (alarmFadeTimer) clearInterval(alarmFadeTimer);
+    const fadeMs = 20000;
+    const started = Date.now();
+    setVolume(0.02);
+    alarmFadeTimer = setInterval(() => {
+      const progress = Math.min(1, (Date.now() - started) / fadeMs);
+      setVolume(alarmTargetVolume * progress);
+      if (progress >= 1) {
+        clearInterval(alarmFadeTimer);
+        alarmFadeTimer = null;
+        setVolume(alarmTargetVolume);
+        setAlarmStatus('已响铃');
+      }
+    }, 1000);
+  }
+
+  function triggerAlarm() {
+    cancelAlarmTimer();
+    if (!audio.paused) {
+      showPlaybackNotice('闹钟时间到，电台已经在播放。');
+      setAlarmStatus('已响铃');
+      return;
+    }
+    alarmTargetVolume = Math.max(0.2, Number(audio.volume || volSlider?.value || 0.8));
+    beginAlarmFadeIn();
+    const playResult = audio.play();
+    if (playResult?.catch) {
+      playResult
+        .then(() => setPlaying(true))
+        .catch(() => {
+          requestNextTrack('', 'alarm_start');
+          showPlaybackNotice('闹钟时间到，正在尝试开始播放。');
+        });
+    }
+    showPlaybackNotice('闹钟时间到，Claudio 已开始播放。');
+  }
+
+  function renderAlarmCountdown() {
+    const minutes = minutesUntilTime(alarmTargetTime);
+    if (minutes === null) {
+      cancelAlarmTimer();
+      setAlarmStatus('时间格式无效');
+      return;
+    }
+    const now = new Date();
+    const current = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    if (current === alarmTargetTime) {
+      triggerAlarm();
+      return;
+    }
+    setAlarmStatus(`${alarmTargetTime} 响铃，约 ${minutes} 分钟后`);
+  }
+
+  function startAlarmTimer() {
+    const value = alarmTime?.value || '';
+    if (!value) {
+      setAlarmStatus('请选择时间');
+      return;
+    }
+    if (alarmTimer) clearInterval(alarmTimer);
+    if (alarmFadeTimer) clearInterval(alarmFadeTimer);
+    alarmTargetTime = value;
+    renderAlarmCountdown();
+    alarmTimer = setInterval(renderAlarmCountdown, 1000);
+  }
+
+  function renderBlockedTracks(items = []) {
+    if (!blockedList) return;
+    if (!items.length) {
+      blockedList.innerHTML = '<p class="blocked-empty">暂无屏蔽歌曲</p>';
+      return;
+    }
+    blockedList.innerHTML = items.map(item => `
+      <div class="blocked-item">
+        <div>
+          <strong>${escapeHtml(item.name || item.key)}</strong>
+          <span>${escapeHtml(item.artist || '')}</span>
+        </div>
+        <button type="button" data-restore-key="${escapeHtml(item.key)}">RESTORE</button>
+      </div>
+    `).join('');
+  }
+
+  async function loadBlockedTracks() {
+    if (!blockedList) return;
+    try {
+      const res = await fetch('/api/local-pool/removed');
+      const data = await res.json();
+      renderBlockedTracks(data.removedTracks || []);
+    } catch {
+      blockedList.innerHTML = '<p class="blocked-empty">屏蔽列表读取失败</p>';
+    }
+  }
+
+  async function restoreBlockedTrack(key) {
+    if (!key) return;
+    const res = await fetch('/api/local-pool/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.reason || '恢复失败');
+    await loadBlockedTracks();
+    showPlaybackNotice('已恢复屏蔽歌曲');
   }
 
   function memoryFileName() {
@@ -437,8 +664,9 @@
     if (qqLoginStatus) {
       const cookie = data.cookie || {};
       const tokenReady = cookie.qqmusicKey?.present || cookie.qmKeyst?.present;
-      qqLoginStatus.textContent = data.message
-        || (tokenReady ? 'QQ 音乐 Cookie 已配置' : 'QQ 音乐登录未就绪');
+      qqLoginStatus.textContent = data.qqCookieHealth?.suspectedExpired
+        ? (data.qqCookieHealth.message || 'QQ 音乐 Cookie 疑似过期，请扫码刷新')
+        : (data.message || (tokenReady ? 'QQ 音乐 Cookie 已配置' : 'QQ 音乐登录未就绪'));
     }
     if (qqLoginQr) {
       if (data.qrDataUrl) {
@@ -588,7 +816,10 @@
         S.settings = {
           ...(S.settings || {}),
           scene: d.scene ?? S.settings?.scene,
+          effectiveScene: d.effectiveScene ?? S.settings?.effectiveScene,
           djPolicy: d.djPolicy ?? S.settings?.djPolicy,
+          effectiveDjPolicy: d.effectiveDjPolicy ?? S.settings?.effectiveDjPolicy,
+          timeStrategy: d.timeStrategy ?? S.settings?.timeStrategy,
           recommendation: d.queue?.recommendation
             ? { ...(S.settings?.recommendation || {}), ...d.queue.recommendation }
             : S.settings?.recommendation,
@@ -647,15 +878,39 @@
     } catch {}
   }
 
-  function requestNextTrack(reason = '', skipReason = '') {
+  let nextRequestTrackId = null;
+  function requestNextTrack(reason = '', skipReason = '', nextReason = '') {
+    const trackId = S.track?.id || '';
+    if (trackId && nextRequestTrackId === trackId) return Promise.resolve();
+    nextRequestTrackId = trackId || '__unknown__';
     stopCurrentDjVoice(true);
     if (reason) addBubble('dj', reason);
     const options = { method: 'POST' };
-    if (skipReason && S.track) {
+    if (trackId || skipReason || nextReason) {
       options.headers = { 'Content-Type': 'application/json' };
-      options.body = JSON.stringify({ skipReason, id: S.track.id });
+      options.body = JSON.stringify({ skipReason, id: trackId, reason: nextReason });
     }
-    return fetch('/api/next', options).catch(() => {});
+    return fetch('/api/next', options)
+      .then((res) => res?.json?.())
+      .then((data) => {
+        if (data?.playbackNotice) showPlaybackNotice(data.playbackNotice);
+        return data;
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (nextRequestTrackId === (trackId || '__unknown__')) nextRequestTrackId = null;
+      });
+  }
+
+  let playbackNoticeTimer = null;
+  function showPlaybackNotice(message) {
+    if (!playbackNotice || !message) return;
+    playbackNotice.textContent = message;
+    playbackNotice.classList.add('show');
+    if (playbackNoticeTimer) clearTimeout(playbackNoticeTimer);
+    playbackNoticeTimer = setTimeout(() => {
+      playbackNotice.classList.remove('show');
+    }, 4200);
   }
 
   // ─── Load track ────────────────────────────────────────────────────────────
@@ -666,6 +921,7 @@
     S.userRequested = userRequested;
     app.classList.remove('loading');
     updateSaveLocalButton();
+    updateRemoveLocalButton();
 
     const artist  = artistOf(track);
     const album   = track.album?.name || track.al?.name || '';
@@ -675,6 +931,11 @@
     songArtist.textContent = artist;
     songAlbum.textContent  = album;
     if (songReason) songReason.textContent = recommendationLabel(track);
+    lastProgressAt = Date.now();
+    lastProgressTime = 0;
+    fill.style.width = '0%';
+    tCur.textContent = '0:00';
+    tEnd.textContent = '0:00';
 
     if (picUrl) {
       const img = new Image();
@@ -697,8 +958,22 @@
 
   // ─── Playback ──────────────────────────────────────────────────────────────
   const PLAYBACK_STALL_MS = 20000;
+  const TRIAL_CLIP_SKIP_LIMIT = 3;
+  const TRIAL_CLIP_SKIP_WINDOW_MS = 45000;
   let lastProgressAt = Date.now();
   let lastProgressTime = 0;
+  let trialClipSkips = [];
+
+  function canAutoSkipTrialClip(now = Date.now()) {
+    trialClipSkips = trialClipSkips.filter((ts) => now - ts < TRIAL_CLIP_SKIP_WINDOW_MS);
+    if (trialClipSkips.length >= TRIAL_CLIP_SKIP_LIMIT) return false;
+    trialClipSkips.push(now);
+    return true;
+  }
+
+  function resetTrialClipSkips() {
+    trialClipSkips = [];
+  }
 
   function setPlaying(v) {
     S.playing = v;
@@ -742,7 +1017,35 @@
     };
   }
 
-  audio.onended  = () => requestNextTrack();
+  if (btnRemoveLocal) {
+    btnRemoveLocal.onclick = async () => {
+      const source = S.track?.recommendationSource;
+      if (!S.track || source === 'external' || source === 'removed') return;
+      const name = S.track.name || '这首歌';
+      btnRemoveLocal.disabled = true;
+      btnRemoveLocal.textContent = 'BUSY';
+      try {
+        const res = await fetch('/api/local-pool/remove-current', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.reason || '删除失败');
+        addBubble('dj', `《${name}》已从本地歌单池删除，并会永久屏蔽。`);
+        if (S.track) {
+          S.track = {
+            ...S.track,
+            recommendationSource: 'removed',
+            recommendationReason: '已从本地歌单池删除'
+          };
+        }
+        if (data.queue) renderQueue(data.queue);
+      } catch (error) {
+        addBubble('dj', error.message || '从本地歌单池删除失败。');
+      } finally {
+        updateRemoveLocalButton();
+      }
+    };
+  }
+
+  audio.onended  = () => requestNextTrack('', '', 'ended');
   audio.onplay   = () => {
     lastProgressAt = Date.now();
     lastProgressTime = audio.currentTime || 0;
@@ -761,8 +1064,17 @@
     const dur = audio.duration;
     const isQQ = S.track?.id?.startsWith?.('qq:');
     if (!isQQ && dur > 0 && dur <= 35) {
+      if (!canAutoSkipTrialClip()) {
+        console.warn('连续遇到网易云试听片段，暂停自动跳过');
+        showPlaybackNotice('连续遇到试听片段，已暂停自动换歌，点下一首继续。');
+        audio.pause();
+        setPlaying(false);
+        return;
+      }
       console.warn(`Netease 试听片段（${Math.round(dur)}s），自动跳过`);
-      requestNextTrack(`《${S.track?.name || '该歌曲'}》只有试听版，马上换下一首。`);
+      requestNextTrack(`《${S.track?.name || '该歌曲'}》只有试听版，马上换下一首。`, '', 'trial_clip');
+    } else {
+      resetTrialClipSkips();
     }
   };
 
@@ -783,7 +1095,8 @@
     } else {
       console.warn('Audio error — requesting next track');
       reportPlaybackFailure('client_error', 'audio element error');
-      requestNextTrack(`《${S.track?.name || '该歌曲'}》当前音源暂时打不开，已跳过。`);
+      showPlaybackNotice(`《${S.track?.name || '该歌曲'}》当前音源暂时打不开，已自动换歌。`);
+      requestNextTrack('', 'client_error', 'client_error');
     }
   };
 
@@ -813,7 +1126,8 @@
     if (Date.now() - lastProgressAt > PLAYBACK_STALL_MS) {
       console.warn('Playback stalled — requesting next track');
       reportPlaybackFailure('stalled', `no progress for ${PLAYBACK_STALL_MS}ms`);
-      requestNextTrack(`《${S.track?.name || '该歌曲'}》播放卡住了，马上换下一首。`);
+      showPlaybackNotice(`《${S.track?.name || '该歌曲'}》播放卡住，已自动换歌。`);
+      requestNextTrack('', 'stalled', 'stalled');
     }
   }, 5000);
 
@@ -987,6 +1301,24 @@
   }
   if (memoryImportFile) {
     memoryImportFile.onchange = () => importRadioMemory(memoryImportFile.files?.[0]);
+  }
+  document.querySelectorAll('[data-sleep-minutes]').forEach((button) => {
+    button.onclick = () => startSleepTimer(button.dataset.sleepMinutes);
+  });
+  if (sleepOff) sleepOff.onclick = cancelSleepTimer;
+  if (alarmOn) alarmOn.onclick = startAlarmTimer;
+  if (alarmOff) alarmOff.onclick = cancelAlarmTimer;
+  if (blockedRefresh) blockedRefresh.onclick = loadBlockedTracks;
+  if (blockedList) {
+    blockedList.onclick = (event) => {
+      const button = event.target.closest('[data-restore-key]');
+      if (!button) return;
+      button.disabled = true;
+      restoreBlockedTrack(button.dataset.restoreKey).catch((error) => {
+        button.disabled = false;
+        showPlaybackNotice(error.message || '恢复失败');
+      });
+    };
   }
   if (qqLoginStart) qqLoginStart.onclick = startQqLogin;
   if (qqLoginCancel) qqLoginCancel.onclick = cancelQqLogin;

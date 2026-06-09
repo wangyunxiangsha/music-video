@@ -10,7 +10,7 @@ assert.doesNotMatch(html, /id="btn-taste"/);
 assert.doesNotMatch(html, />TASTE<\/button>/);
 assert.doesNotMatch(html, /btn-history-fab/);
 assert.doesNotMatch(css, /\.history-fab/);
-assert.match(css, /grid-template-columns:\s*repeat\(6,\s*1fr\)/);
+assert.match(css, /grid-template-columns:\s*repeat\(5,\s*1fr\)/);
 
 const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 assert.doesNotMatch(app, /btnHistoryFab/);

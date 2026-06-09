@@ -67,6 +67,14 @@ async function run() {
   ], '夜笙歌');
   assert.deepStrictEqual(originalFallback.map(item => item.id), ['cover3']);
 
+  assert.strictEqual(mixer.titleMatches(track('title1', '漫步人生路', '邓丽君'), '漫漫人生路'), true);
+  assert.strictEqual(mixer.titleMatches(track('title2', '時の流れに身をまかせ', '邓丽君'), '漫漫人生路'), false);
+  const titlePreferred = mixer.preferTitleMatches([
+    track('wrong-title', '時の流れに身をまかせ', '邓丽君'),
+    track('fuzzy-title', '漫步人生路', '邓丽君')
+  ], '漫漫人生路');
+  assert.deepStrictEqual(titlePreferred.map(item => item.id), ['fuzzy-title']);
+
   const localOnly = mixer.mixRecommendationQueue({ localPool, externalPool, localRatio: 1, limit: 6 });
   assert.deepStrictEqual(localOnly.map(item => item.id), ['l1', 'l2', 'l3', 'l4', 'l5', 'l6']);
 

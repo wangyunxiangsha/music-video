@@ -133,6 +133,9 @@ function handleHelperEvent(event = {}) {
   if (event.type === 'credential') {
     const cookie = cookieFromCredential(event.credential || event);
     updateEnvCookie(session.envFile, cookie);
+    try {
+      session.onCookieUpdated?.(cookie);
+    } catch {}
     finishSession('done', 'QQ Music login refreshed');
     return;
   }
@@ -145,7 +148,8 @@ function startLogin({
   python = process.env.PYTHON || 'python',
   envFile = ENV_FILE,
   helperScript = HELPER_SCRIPT,
-  qrTimeoutMs = Number(process.env.QQ_LOGIN_QR_TIMEOUT_MS || 30000)
+  qrTimeoutMs = Number(process.env.QQ_LOGIN_QR_TIMEOUT_MS || 30000),
+  onCookieUpdated = null
 } = {}) {
   if (session?.child && !session.done) return safeSession();
 
@@ -158,6 +162,7 @@ function startLogin({
     updatedAt: new Date().toISOString(),
     qrDataUrl: '',
     envFile,
+    onCookieUpdated: typeof onCookieUpdated === 'function' ? onCookieUpdated : null,
     timeout: null
   };
 

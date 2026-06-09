@@ -16,7 +16,7 @@ npm install
 npm start
 ```
 
-默认从 `PORT=8080` 启动；如果端口被占用，会按 `PORT_RETRY_LIMIT` 自动尝试后续端口。控制台打印的“本地访问”地址是本次真实地址。
+默认从 `PORT=8080` 启动；如果端口被占用，会按 `PORT_RETRY_LIMIT` 自动尝试后续端口。控制台打印的“本地访问”地址是本次真实地址，也会写入 `data/runtime.json`，其中的 `url` 可用于确认本次实际端口。
 
 ## 云部署
 
@@ -47,6 +47,10 @@ npm start
 ### QQ 音乐扫码刷新
 
 `SET` 面板里的“QQ 音乐登录”可以启动扫码刷新流程。这个功能通过可选的 Python helper 调用 `qqmusic-api-python` 获取新的 `musicid/musickey`，成功后会自动写回 `.env` 的 `QQ_MUSIC_COOKIE`，并立即更新当前 Node 进程里的运行时 Cookie。
+
+也就是说，通过 `SET` 面板扫码成功后不需要重新 `npm start`；只有手动编辑 `.env` 里的 Cookie 时，才需要重启服务让新配置生效。扫码成功后还会清空 QQ URL 缓存、单曲不可用缓存、熔断状态和 Cookie 健康提示，避免旧 Cookie 下的失败记录继续挡住新 Cookie。播放器连续遇到全音质 `empty purl` 或 QQ 接口鉴权失败时，会在 `SET` 面板提示 Cookie 疑似过期，请扫码刷新。
+
+明确点歌（例如“切换 Simple Plan 的 Take My Hand”）会在 QQ 已登录时优先尝试 QQ 音乐同名同歌手候选，并做 CDN probe；QQ 不可播或未登录时才回落网易云。自动队列和分类播放仍可能按本地歌单 ID 使用网易云，前端会对网易云 `<=35s` 的试听片段自动换歌。
 
 首次使用前安装辅助库：
 

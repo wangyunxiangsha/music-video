@@ -7,6 +7,7 @@ const QQ_CIRCUIT_COOLDOWN_MS = Number(process.env.QQ_CIRCUIT_COOLDOWN_MS || 10 *
 const QQ_URL_CACHE_MS = Number(process.env.QQ_URL_CACHE_MS || 5 * 60 * 1000);
 const QQ_UNAVAILABLE_CACHE_MS = Number(process.env.QQ_UNAVAILABLE_CACHE_MS || 15 * 60 * 1000);
 const QQ_DEBUG_URL = process.env.QQ_DEBUG_URL === '1';
+const QQ_COOKIE_HEALTH_THRESHOLD = Number(process.env.QQ_COOKIE_HEALTH_THRESHOLD || 3);
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -26,6 +27,12 @@ const circuit = {
 const urlCache = new Map();
 const unavailableCache = new Map();
 const recentUrlAttempts = [];
+const cookieHealth = {
+  consecutiveSignals: 0,
+  suspectedExpired: false,
+  lastReason: '',
+  lastAt: null
+};
 
 const QQ_QUALITY_FALLBACKS = [
   { quality: 'M800', ext: 'mp3' },
@@ -65,6 +72,57 @@ function resetCircuit() {
   circuit.failures = 0;
   circuit.openUntil = 0;
   circuit.lastReason = '';
+}
+
+function resetCookieHealth() {
+  cookieHealth.consecutiveSignals = 0;
+  cookieHealth.suspectedExpired = false;
+  cookieHealth.lastReason = '';
+  cookieHealth.lastAt = null;
+}
+
+function resetRuntimeState() {
+  urlCache.clear();
+  unavailableCache.clear();
+  recentUrlAttempts.length = 0;
+  resetCircuit();
+  resetCookieHealth();
+}
+
+function getCookieHealth() {
+  return {
+    configured: Boolean(getQQCookie()),
+    suspectedExpired: Boolean(getQQCookie()) && cookieHealth.suspectedExpired,
+    consecutiveSignals: cookieHealth.consecutiveSignals,
+    threshold: QQ_COOKIE_HEALTH_THRESHOLD,
+    lastReason: cookieHealth.lastReason,
+    lastAt: cookieHealth.lastAt,
+    message: cookieHealth.suspectedExpired ? 'QQ 音乐 Cookie 疑似过期，请扫码刷新' : ''
+  };
+}
+
+function isAuthFailureReason(reason = '') {
+  return /(HTTP\s*(401|403)|auth|login|cookie|鉴权|登录|未登录|过期|失效)/i.test(String(reason));
+}
+
+function recordCookieHealthSignal(reason) {
+  cookieHealth.consecutiveSignals += 1;
+  cookieHealth.lastReason = reason || 'unknown';
+  cookieHealth.lastAt = new Date().toISOString();
+  if (cookieHealth.consecutiveSignals >= QQ_COOKIE_HEALTH_THRESHOLD) {
+    cookieHealth.suspectedExpired = true;
+  }
+}
+
+function recordCookieHealthFromAttempts(attempts = []) {
+  const validAttempts = attempts.filter(item => item?.quality);
+  if (!validAttempts.length) return getCookieHealth();
+  const allEmptyPurl = validAttempts.every(item => item.reason === 'empty purl');
+  const authFailure = validAttempts.find(item => isAuthFailureReason(item.reason));
+  if (allEmptyPurl || authFailure) {
+    recordCookieHealthSignal(allEmptyPurl ? 'all qualities returned empty purl' : authFailure.reason);
+  }
+  return getCookieHealth();
 }
 
 function recordCircuitFailure(reason) {
@@ -294,6 +352,7 @@ async function getSongUrl(songmid, mediaMid = '') {
       if (probe.status === 200 || probe.status === 206) {
         logger.debug(`QQ Music URL 成功 (${quality}): ${url.substring(0, 80)}...`);
         resetCircuit();
+        resetCookieHealth();
         urlCache.set(songmid, { url, expiresAt: Date.now() + QQ_URL_CACHE_MS });
         qualityAttempts.push({ quality, reason: `CDN HTTP ${probe.status}`, status: probe.status });
         rememberUrlAttempt(songmid, qualityAttempts, 'success');
@@ -314,6 +373,7 @@ async function getSongUrl(songmid, mediaMid = '') {
     attempts: qualityAttempts,
     expiresAt: Date.now() + QQ_UNAVAILABLE_CACHE_MS
   });
+  recordCookieHealthFromAttempts(qualityAttempts);
   rememberUrlAttempt(songmid, qualityAttempts, 'failed');
   logger.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${failureSummary})`);
   recordCircuitFailure(failureSummary);
@@ -450,6 +510,10 @@ module.exports = {
   getPlaylistSongs,
   getCircuitState,
   resetCircuit,
+  resetRuntimeState,
+  getCookieHealth,
+  resetCookieHealth,
+  recordCookieHealthFromAttempts,
   isEnabled: () => !!getQQCookie(),
   getQQCookie,
   extractUin,

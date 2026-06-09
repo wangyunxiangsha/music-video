@@ -30,6 +30,10 @@ const ts = (iso) => Math.floor(new Date(iso).getTime() / 1000);
   assert.deepStrictEqual(report.topArtists[0], { name: 'SING女团', count: 3 });
   assert.deepStrictEqual(report.topCategories[0], { name: '国风', count: 3 });
   assert.deepStrictEqual(report.skippedCategories[0], { name: '国风', count: 1 });
+  assert.ok(report.insights.some(text => /今天 Claudio 学到/.test(text)));
+  assert.ok(report.insights.some(text => /SING女团/.test(text)));
+  assert.ok(report.adjustments.some(text => /外部推荐/.test(text)));
+  assert.ok(report.adjustments.some(text => /国风/.test(text)));
 }
 
 {
@@ -39,6 +43,8 @@ const ts = (iso) => Math.floor(new Date(iso).getTime() / 1000);
   assert.strictEqual(empty.externalRatio, 0);
   assert.deepStrictEqual(empty.topArtists, []);
   assert.deepStrictEqual(empty.feedback, { skipCount: 0, notVibeCount: 0, likeCount: 0, dislikeCount: 0 });
+  assert.deepStrictEqual(empty.insights, ['今天还没有足够记录，Claudio 会先保持默认电台策略。']);
+  assert.deepStrictEqual(empty.adjustments, ['继续以你的本地歌单为主，等有反馈后再调整推荐方向。']);
 }
 
 console.log('today report tests passed');
