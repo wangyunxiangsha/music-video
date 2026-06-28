@@ -257,6 +257,15 @@
           <p class="blocked-empty">暂无屏蔽歌曲</p>
         </div>
       </div>
+      <div class="account-status-panel" id="account-status-panel">
+        <div class="account-status-head">
+          <span>ACCOUNTS</span>
+          <strong>平台状态</strong>
+        </div>
+        <div id="account-status-list" class="account-status-list">
+          <p class="account-status-empty">账号状态同步中</p>
+        </div>
+      </div>
       <div class="qq-login-panel">
         <div class="qq-login-head">
           <span>QQ LOGIN</span>
@@ -268,6 +277,18 @@
         </div>
         <img id="qq-login-qr" class="qq-login-qr" alt="QQ 音乐登录二维码" hidden>
         <p id="qq-login-status" class="qq-login-status" aria-live="polite"></p>
+      </div>
+      <div class="netease-login-panel">
+        <div class="netease-login-head">
+          <span>NETEASE LOGIN</span>
+          <strong>网易云登录</strong>
+        </div>
+        <div class="netease-login-actions">
+          <button id="netease-login-start" type="button">扫码刷新</button>
+          <button id="netease-login-cancel" type="button">取消</button>
+        </div>
+        <img id="netease-login-qr" class="netease-login-qr" alt="网易云音乐登录二维码" hidden>
+        <p id="netease-login-status" class="netease-login-status" aria-live="polite"></p>
       </div>
     </section>
 

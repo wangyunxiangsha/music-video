@@ -86,6 +86,11 @@
   const qqLoginCancel = $('qq-login-cancel');
   const qqLoginQr = $('qq-login-qr');
   const qqLoginStatus = $('qq-login-status');
+  const accountStatusList = $('account-status-list');
+  const neteaseLoginStart = $('netease-login-start');
+  const neteaseLoginCancel = $('netease-login-cancel');
+  const neteaseLoginQr = $('netease-login-qr');
+  const neteaseLoginStatus = $('netease-login-status');
   const lyricOv   = $('lyric-overlay');
   const lyricScroll = $('lyric-scroll');
   const lyricClose  = $('lyric-close');
@@ -117,7 +122,7 @@
   }
 
   function recommendationLabel(track = {}) {
-    const reason = track.recommendationReason || '';
+    const reason = track.playbackSwitchReason || track.recommendationReason || '';
     if (reason) return reason;
     if (track.recommendationSource === 'external') return '外部推荐';
     if (track.recommendationSource === 'local') return '来自本地歌单';
@@ -664,9 +669,12 @@
     if (qqLoginStatus) {
       const cookie = data.cookie || {};
       const tokenReady = cookie.qqmusicKey?.present || cookie.qmKeyst?.present;
+      const playbackMissing = tokenReady && data.qqPlaybackAuth && !data.qqPlaybackAuth?.playbackKeyReady;
       qqLoginStatus.textContent = data.qqCookieHealth?.suspectedExpired
         ? (data.qqCookieHealth.message || 'QQ 音乐 Cookie 疑似过期，请扫码刷新')
-        : (data.message || (tokenReady ? 'QQ 音乐 Cookie 已配置' : 'QQ 音乐登录未就绪'));
+        : (playbackMissing
+          ? '\u0051\u0051 \u97f3\u4e50\u5df2\u767b\u5f55\uff0c\u4f46\u8fd8\u7f3a\u64ad\u653e\u6388\u6743\uff0c\u8bf7\u626b\u7801\u5237\u65b0'
+          : (data.message || (tokenReady ? 'QQ 音乐 Cookie 已配置' : 'QQ 音乐登录未就绪')));
     }
     if (qqLoginQr) {
       if (data.qrDataUrl) {
@@ -696,6 +704,7 @@
     try {
       const res = await fetch('/api/qq-login/start', { method: 'POST' });
       renderQqLoginStatus(await res.json());
+      refreshAccountStatus();
     } catch {
       if (qqLoginStatus) qqLoginStatus.textContent = 'QQ 登录助手启动失败';
     }
@@ -705,8 +714,91 @@
     try {
       const res = await fetch('/api/qq-login/cancel', { method: 'POST' });
       renderQqLoginStatus(await res.json());
+      refreshAccountStatus();
     } catch {
       if (qqLoginStatus) qqLoginStatus.textContent = '取消失败';
+    }
+  }
+
+  function renderNeteaseLoginStatus(data = {}) {
+    if (neteaseLoginStatus) {
+      const cookie = data.cookie || {};
+      const ready = cookie.musicU?.present;
+      neteaseLoginStatus.textContent = data.message || (ready ? '网易云音乐 Cookie 已配置' : '网易云音乐登录未就绪');
+    }
+    if (neteaseLoginQr) {
+      if (data.qrDataUrl) {
+        neteaseLoginQr.src = data.qrDataUrl;
+        neteaseLoginQr.hidden = false;
+      } else {
+        neteaseLoginQr.removeAttribute('src');
+        neteaseLoginQr.hidden = true;
+      }
+    }
+    if (neteaseLoginStart) neteaseLoginStart.disabled = data.status === 'starting' || data.status === 'waiting_scan';
+  }
+
+  async function refreshNeteaseLoginStatus() {
+    try {
+      const res = await fetch('/api/netease-login/status');
+      renderNeteaseLoginStatus(await res.json());
+    } catch {
+      if (neteaseLoginStatus) neteaseLoginStatus.textContent = '网易云登录状态暂时不可用';
+    }
+  }
+
+  async function startNeteaseLogin() {
+    if (!neteaseLoginStart) return;
+    neteaseLoginStart.disabled = true;
+    if (neteaseLoginStatus) neteaseLoginStatus.textContent = '正在生成网易云登录二维码...';
+    try {
+      const res = await fetch('/api/netease-login/start', { method: 'POST' });
+      renderNeteaseLoginStatus(await res.json());
+      refreshAccountStatus();
+    } catch {
+      if (neteaseLoginStatus) neteaseLoginStatus.textContent = '网易云登录启动失败';
+    }
+  }
+
+  async function cancelNeteaseLogin() {
+    try {
+      const res = await fetch('/api/netease-login/cancel', { method: 'POST' });
+      renderNeteaseLoginStatus(await res.json());
+      refreshAccountStatus();
+    } catch {
+      if (neteaseLoginStatus) neteaseLoginStatus.textContent = '取消失败';
+    }
+  }
+
+  function accountStatusItems(data = {}) {
+    return [
+      { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.login || {}) },
+      { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.playback || {}) },
+      { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.cookie || {}) },
+      { platform: data.netease?.label || '网易云', ...(data.netease?.login || {}) },
+      { platform: data.netease?.label || '网易云', ...(data.netease?.playback || {}) }
+    ];
+  }
+
+  function renderAccountStatus(data = {}) {
+    if (!accountStatusList) return;
+    const items = accountStatusItems(data);
+    accountStatusList.innerHTML = items.map((entry) => `
+      <div class="account-status-item ${escapeHtml(entry.state || 'unknown')}">
+        <span>${escapeHtml(entry.platform || '')}</span>
+        <strong>${escapeHtml(entry.label || '')}</strong>
+        <em>${escapeHtml(entry.message || '')}</em>
+      </div>
+    `).join('');
+  }
+
+  async function refreshAccountStatus() {
+    if (!accountStatusList) return;
+    try {
+      const res = await fetch('/api/account-status');
+      renderAccountStatus(await res.json());
+    } catch {
+      accountStatusList.innerHTML = '<p class="account-status-empty">账号状态暂时不可用</p>';
     }
   }
 
@@ -865,7 +957,7 @@
 
   async function reportPlaybackFailure(reason, detail = '') {
     try {
-      await fetch('/api/playback/failure', {
+      const res = await fetch('/api/playback/failure', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -875,6 +967,8 @@
           detail
         })
       });
+      const data = await res.json().catch(() => ({}));
+      if (data?.playbackNotice) showPlaybackNotice(data.playbackNotice);
     } catch {}
   }
 
@@ -1095,7 +1189,6 @@
     } else {
       console.warn('Audio error — requesting next track');
       reportPlaybackFailure('client_error', 'audio element error');
-      showPlaybackNotice(`《${S.track?.name || '该歌曲'}》当前音源暂时打不开，已自动换歌。`);
       requestNextTrack('', 'client_error', 'client_error');
     }
   };
@@ -1126,7 +1219,6 @@
     if (Date.now() - lastProgressAt > PLAYBACK_STALL_MS) {
       console.warn('Playback stalled — requesting next track');
       reportPlaybackFailure('stalled', `no progress for ${PLAYBACK_STALL_MS}ms`);
-      showPlaybackNotice(`《${S.track?.name || '该歌曲'}》播放卡住，已自动换歌。`);
       requestNextTrack('', 'stalled', 'stalled');
     }
   }, 5000);
@@ -1254,7 +1346,12 @@
       S.settingsOpen = !S.settingsOpen;
       if (settingsPanel) settingsPanel.hidden = !S.settingsOpen;
       btnSettings.classList.toggle('active', S.settingsOpen);
-      if (S.settingsOpen) loadSettings();
+      if (S.settingsOpen) {
+        loadSettings();
+        refreshAccountStatus();
+        refreshQqLoginStatus();
+        refreshNeteaseLoginStatus();
+      }
     };
   }
 
@@ -1322,6 +1419,8 @@
   }
   if (qqLoginStart) qqLoginStart.onclick = startQqLogin;
   if (qqLoginCancel) qqLoginCancel.onclick = cancelQqLogin;
+  if (neteaseLoginStart) neteaseLoginStart.onclick = startNeteaseLogin;
+  if (neteaseLoginCancel) neteaseLoginCancel.onclick = cancelNeteaseLogin;
   if (qqLoginStatus) {
     refreshQqLoginStatus();
     setInterval(refreshQqLoginStatus, 5000);

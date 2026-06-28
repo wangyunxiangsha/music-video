@@ -17,5 +17,14 @@ assert.match(deployment, /云部署/);
 assert.match(deployment, /PWA 缓存/);
 assert.match(deployment, /Cookie 更新/);
 assert.match(deployment, /\/api\/health/);
+assert.match(readme, /本地账号权益/);
+assert.match(readme, /不重新分发音乐/);
+assert.match(readme, /不会缓存下载音频/);
+assert.match(readme, /\/api\/account-status/);
+assert.match(deployment, /账号权益与隐私边界/);
+assert.match(deployment, /Cookie 排查顺序/);
+assert.match(deployment, /\/api\/account-status/);
+assert.match(deployment, /\/api\/debug\/qq-circuit/);
+assert.match(deployment, /不会包含 \.env、Cookie、API Key/);
 
 console.log('deployment docs tests passed');

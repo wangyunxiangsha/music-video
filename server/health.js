@@ -47,6 +47,7 @@ function buildHealthSnapshot({
   startedAt = null,
   env = process.env,
   qqCircuit = {},
+  qqPlaybackAuth = {},
   playbackDiagnostics = {},
   playbackMemory = {},
   weather = ''
@@ -75,7 +76,8 @@ function buildHealthSnapshot({
       netease: { enabled: true },
       qq: {
         enabled: Boolean(env.QQ_MUSIC_COOKIE),
-        circuit: qqCircuit
+        circuit: qqCircuit,
+        playbackAuth: qqPlaybackAuth
       }
     },
     playback: {

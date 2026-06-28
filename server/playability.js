@@ -19,7 +19,10 @@ async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolve
     }
     if (key) seen.add(key);
     if (isBlocked(candidate)) {
-      skipped.push(candidate);
+      skipped.push({
+        ...candidate,
+        playbackFailureReason: '已被本地播放记忆临时跳过'
+      });
       i -= 1;
       continue;
     }
@@ -29,7 +32,10 @@ async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolve
         return { track: candidate, remaining: queue.filter(entry => !entry.fallback).map(entry => entry.track), skipped };
       }
     } catch {}
-    skipped.push(candidate);
+    skipped.push({
+      ...candidate,
+      playbackFailureReason: '音源暂时不可用'
+    });
   }
 
   return { track: null, remaining: queue.filter(entry => !entry.fallback).map(entry => entry.track), skipped };

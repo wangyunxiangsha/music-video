@@ -10,6 +10,7 @@ assert.match(server, /let activePort/);
 assert.match(server, /runStartupSelfCheck/);
 assert.match(server, /app\.get\('\/api\/health'/);
 assert.match(server, /health\.buildHealthSnapshot/);
+assert.match(server, /health\.buildHealthSnapshot\(\{[\s\S]*qqPlaybackAuth:\s*qqmusic\.getPlaybackAuthStatus\(\)[\s\S]*\}\)/);
 assert.match(readme, /\/api\/health/);
 
 console.log('health api tests passed');

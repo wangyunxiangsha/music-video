@@ -6,7 +6,9 @@ const logger = require('./logger');
 
 const NCM_PORT      = process.env.NCM_PORT || 3001;
 const NCM_BASE      = `http://127.0.0.1:${NCM_PORT}`;
-const NCM_COOKIE    = process.env.NETEASE_COOKIE || '';  // optional login cookie
+function getNeteaseCookie(env = process.env) {
+  return env.NETEASE_COOKIE || '';
+}
 
 let neteaseProcess = null;
 
@@ -41,7 +43,8 @@ async function startServer() {
 
 async function ncmGet(endpoint, params = {}) {
   try {
-    const p = NCM_COOKIE ? { ...params, cookie: NCM_COOKIE } : params;
+    const cookie = getNeteaseCookie();
+    const p = cookie ? { ...params, cookie } : params;
     const res = await axios.get(`${NCM_BASE}${endpoint}`, {
       params: p,
       timeout: 8000,
@@ -111,5 +114,7 @@ module.exports = {
   getAlbumCover,
   getUserAccount,
   getUserPlaylists,
-  getPlaylistTracks
+  getPlaylistTracks,
+  getNeteaseCookie,
+  ncmGet
 };

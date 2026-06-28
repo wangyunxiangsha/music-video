@@ -23,6 +23,13 @@ function cookieValue(cookie, name) {
   return found ? found[1] : '';
 }
 
+function serializeCookieObject(cookieObject = {}) {
+  return Object.entries(cookieObject)
+    .filter(([, value]) => value != null && String(value) !== '')
+    .map(([key, value]) => `${key}=${value}`)
+    .join('; ');
+}
+
 function parseCookieStatus(cookie = process.env.QQ_MUSIC_COOKIE || '') {
   const pairs = splitCookie(cookie);
   const get = (name) => {
@@ -46,6 +53,26 @@ function parseCookieStatus(cookie = process.env.QQ_MUSIC_COOKIE || '') {
 }
 
 function cookieFromCredential(credential = {}) {
+  const fullCookie = String(credential.cookie || credential.cookieText || credential.cookie_string || '').trim()
+    || (typeof credential.cookies === 'string' ? credential.cookies.trim() : '')
+    || (credential.cookies && typeof credential.cookies === 'object' ? serializeCookieObject(credential.cookies) : '');
+  if (fullCookie) {
+    const uin = cookieValue(fullCookie, 'uin')
+      || cookieValue(fullCookie, 'qqmusic_uin')
+      || cookieValue(fullCookie, 'wxuin')
+      || cookieValue(fullCookie, 'p_uin');
+    const musicKey = cookieValue(fullCookie, 'qm_keyst')
+      || cookieValue(fullCookie, 'qqmusic_key')
+      || cookieValue(fullCookie, 'music_key')
+      || cookieValue(fullCookie, 'p_skey')
+      || cookieValue(fullCookie, 'skey')
+      || cookieValue(fullCookie, 'psrf_qqaccess_token')
+      || cookieValue(fullCookie, 'psrf_qqrefresh_token')
+      || cookieValue(fullCookie, 'wxrefresh_token')
+      || cookieValue(fullCookie, 'wxskey');
+    if (uin && musicKey) return fullCookie;
+  }
+
   const musicid = String(credential.musicid || credential.musicId || credential.uin || '').replace(/^o/, '');
   const musickey = String(credential.musickey || credential.musicKey || credential.qqmusic_key || credential.qm_keyst || '');
   if (!musicid || !musickey) {

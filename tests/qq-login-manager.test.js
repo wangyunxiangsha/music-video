@@ -19,6 +19,13 @@ assert.match(cookie, /qqmusic_key=music-key-value/);
 assert.match(cookie, /qm_keyst=music-key-value/);
 assert.ok(!cookie.includes('DEEPSEEK_API_KEY'));
 
+const fullCookie = qqLogin.cookieFromCredential({
+  cookie: 'uin=o123456789; qqmusic_key=music-key-value; qm_keyst=music-key-value; psrf_qqaccess_token=access-token; psrf_qqrefresh_token=refresh-token'
+});
+assert.match(fullCookie, /uin=o123456789/);
+assert.match(fullCookie, /psrf_qqaccess_token=access-token/);
+assert.match(fullCookie, /psrf_qqrefresh_token=refresh-token/);
+
 const parsed = qqLogin.parseCookieStatus(cookie);
 assert.strictEqual(parsed.uin.present, true);
 assert.strictEqual(parsed.qqmusicKey.present, true);

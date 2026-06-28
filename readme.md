@@ -47,6 +47,14 @@ npm start
 
 QQ 音乐 Cookie 失效时，可以在 `SET` 面板使用“扫码刷新”。播放器也会在连续出现全音质 empty purl 或 QQ 接口鉴权失败时，把 SET 状态标记为“疑似过期，请扫码刷新”。首次使用前需要安装可选 helper：`python -m pip install qqmusic-api-python`。
 
+### 本地账号权益与隐私边界
+
+Claudio FM 只使用你在本机配置或扫码得到的网易云 / QQ 音乐账号 Cookie。会员歌曲能否完整播放，取决于你自己的平台账号权益；普通会员、高级会员、地区版权和单曲限制都会影响结果。系统不会绕过平台权益，也不会把账号授权共享给其他用户。
+
+Claudio FM 不重新分发音乐，不把平台音频保存成下载文件，也不会缓存下载音频；音频只通过本地服务代理给当前浏览器播放。电台记忆导出不会包含 `.env`、Cookie、API Key 或平台登录信息。
+
+排查账号状态可先看 `SET` 面板的“平台状态”，或访问 `GET /api/account-status`；QQ 播放 URL、音质降级和 Cookie 健康细节可看 `GET /api/debug/qq-circuit`。
+
 ### 5. PWA 安装（可选）
 在 Chrome/Edge 地址栏右侧点击安装图标，即可安装到桌面/手机。
 
@@ -454,6 +462,10 @@ npm run classify
 | GET | /api/history | 播放历史摘要：今日报告、记录数、常听歌手、常听类型、最近播放 |
 | GET | /api/listening-report/today | 今日听歌报告：播放数、去重、外部推荐占比、反馈统计 |
 | GET | /api/health | 健康检查：服务端口、配置自检、音乐源状态、QQ circuit、播放失败诊断 |
+| GET | /api/account-status | 查看 QQ / 网易云登录、播放授权、Cookie 健康和可播放状态 |
+| GET | /api/qq-login/status | 查看 QQ 登录、播放授权和扫码刷新状态 |
+| GET | /api/netease-login/status | 查看网易云登录和扫码刷新状态 |
+| GET | /api/debug/qq-circuit | 查看 QQ 熔断、最近 URL 尝试、音质策略和 Cookie 健康摘要 |
 | GET | /api/debug/stats-storage | 查看 `data/stats.json` 体积、记录数量和是否建议拆分 |
 | POST | /api/local-pool/current | 将当前外部推荐加入本地歌单池；如果曾被移除，会同步解除屏蔽 |
 | POST | /api/local-pool/remove-current | 将当前本地歌曲移出本地歌单池，并写入长期屏蔽列表 |

@@ -14,6 +14,8 @@ assert.match(server, /function knownTrackForPlaybackId/);
 assert.match(server, /stale client playback failure/i);
 assert.match(server, /app\.get\('\/api\/debug\/playback'/);
 assert.match(server, /app\.post\('\/api\/playback\/failure'/);
+assert.match(server, /playbackFailure\.friendlyPlaybackNotice/);
+assert.match(server, /playbackNotice/);
 assert.match(server, /playbackDiagnostics\.recordSuccess\(successfulTrack\)/);
 assert.match(server, /playbackMemory\.recordFailure\(event\)/);
 assert.match(server, /playbackMemory\.recordSuccess\(successfulTrack\)/);

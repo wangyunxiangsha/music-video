@@ -32,6 +32,8 @@ const health = require('./health');
 const tasteProfile = require('./taste-profile');
 const radioMemory = require('./radio-memory');
 const qqLoginManager = require('./qq-login-manager');
+const neteaseLoginManager = require('./netease-login-manager');
+const accountStatus = require('./account-status');
 const logger = require('./logger');
 
 const app = express();
@@ -260,6 +262,16 @@ function knownTrackForPlaybackId(id) {
   return playlist.find((track) => String(track.id) === String(id)) || null;
 }
 
+function qqSwitchReasonFromLatestAttempt() {
+  const latest = qqmusic.getCircuitState().latestUrlAttempt;
+  if (!latest) return 'QQ 音乐候选暂时不可播，已切到网易云。';
+  if (latest.category === 'missing_playback_auth') return 'QQ 音乐缺少播放授权，已切到网易云。';
+  if (latest.category === 'membership_insufficient') return 'QQ 当前会员权限可能不够，已切到网易云。';
+  if (latest.category === 'copyright_unavailable') return 'QQ 音乐版权暂不可播，已切到网易云。';
+  if (latest.category === 'cdn_rejected') return 'QQ 音乐播放地址被 CDN 拒绝，已切到网易云。';
+  return 'QQ 音乐候选暂时不可播，已切到网易云。';
+}
+
 function canAcceptTrialClipNext(now = Date.now()) {
   trialClipNextRequests = trialClipNextRequests.filter((ts) => now - ts < TRIAL_CLIP_NEXT_WINDOW_MS);
   if (trialClipNextRequests.length >= TRIAL_CLIP_NEXT_LIMIT) return false;
@@ -463,6 +475,7 @@ async function findRequestedSong(songName) {
   const requestedTitle = parsed?.song || songName;
 
   // ── 1. QQ Music first for explicit requests to avoid Netease preview clips ──
+  let qqTried = false;
   if (qqmusic.isEnabled()) {
     logger.info(`优先尝试 QQ 音乐点歌: ${query}`);
     const qqResults  = dedupeSongs(await qqmusic.searchSongs(query, 8));
@@ -473,6 +486,7 @@ async function findRequestedSong(songName) {
     const qqRanked   = rankByArtist(qqOriginalPreferred, artist);
     const qqFiltered = artist ? qqRanked : qqRanked.slice(0, 1);
     for (const candidate of qqFiltered.slice(0, 3)) {
+      qqTried = true;
       const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
       if (url) return candidate;
     }
@@ -492,7 +506,19 @@ async function findRequestedSong(songName) {
 
   for (const candidate of neteaseOrdered) {
     const url = await music.getSongUrl(candidate.id);
-    if (url) return candidate;
+    if (url) {
+      if (!qqTried) return candidate;
+      const playbackSwitchReason = qqSwitchReasonFromLatestAttempt();
+      return {
+        ...candidate,
+        playbackSwitchReason,
+        playbackSkippedCandidates: [{
+          source: 'qq',
+          reason: playbackSwitchReason,
+          name: requestedTitle
+        }]
+      };
+    }
   }
 
   return null;
@@ -859,9 +885,16 @@ app.post('/api/playback/failure', async (req, res) => {
       detail,
       track
     });
+    const qqLatest = qqmusic.getCircuitState().latestUrlAttempt || null;
+    const playbackNotice = playbackFailure.friendlyPlaybackNotice({
+      track,
+      reason: reason || 'client_report',
+      qqIssue: track?.source === 'qq' ? qqLatest : null
+    });
     res.json({
       ok: true,
       rebuilt: result.shouldRebuild,
+      playbackNotice,
       diagnostics: {
         ...playbackDiagnostics.snapshot(),
         playbackMemory: playbackMemory.snapshot()
@@ -1345,7 +1378,8 @@ app.post('/api/memory/import', (req, res) => {
 app.get('/api/qq-login/status', (req, res) => {
   res.json({
     ...qqLoginManager.getStatus(),
-    qqCookieHealth: qqmusic.getCookieHealth()
+    qqCookieHealth: qqmusic.getCookieHealth(),
+    qqPlaybackAuth: qqmusic.getPlaybackAuthStatus()
   });
 });
 
@@ -1357,6 +1391,28 @@ app.post('/api/qq-login/start', (req, res) => {
 
 app.post('/api/qq-login/cancel', (req, res) => {
   res.json(qqLoginManager.cancelLogin());
+});
+
+app.get('/api/netease-login/status', (req, res) => {
+  res.json(neteaseLoginManager.getStatus());
+});
+
+app.post('/api/netease-login/start', async (req, res) => {
+  await music.startServer();
+  res.json(await neteaseLoginManager.startLogin());
+});
+
+app.post('/api/netease-login/cancel', (req, res) => {
+  res.json(neteaseLoginManager.cancelLogin());
+});
+
+app.get('/api/account-status', (req, res) => {
+  res.json(accountStatus.buildAccountStatus({
+    qqLoginStatus: qqLoginManager.getStatus(),
+    qqCookieHealth: qqmusic.getCookieHealth(),
+    qqPlaybackAuth: qqmusic.getPlaybackAuthStatus(),
+    neteaseLoginStatus: neteaseLoginManager.getStatus()
+  }));
 });
 
 app.post('/api/chat', async (req, res) => {
@@ -1560,6 +1616,7 @@ app.get('/api/health', (req, res) => {
     startedAt,
     env: process.env,
     qqCircuit: qqmusic.getCircuitState(),
+    qqPlaybackAuth: qqmusic.getPlaybackAuthStatus(),
     playbackDiagnostics: playbackDiagnostics.snapshot(),
     playbackMemory: playbackMemory.snapshot(),
     weather: weatherText

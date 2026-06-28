@@ -12,6 +12,13 @@ const health = require('../server/health');
       PORT: '8080'
     },
     qqCircuit: { open: true, failureCount: 3, recentUrlAttempts: [{ songmid: 'abc' }] },
+    qqPlaybackAuth: {
+      configured: true,
+      uin: '123',
+      musicKey: { present: true, length: 8 },
+      playbackKeyReady: true,
+      playbackKey: { present: true, length: 8 }
+    },
     playbackDiagnostics: { consecutiveFailures: 2, recentFailures: [{ reason: 'stalled' }] },
     playbackMemory: { blockedCount: 4, recentPlayableCount: 9 }
   });
@@ -23,6 +30,8 @@ const health = require('../server/health');
   assert.strictEqual(snapshot.config.weather, 'amap');
   assert.strictEqual(snapshot.musicSources.qq.enabled, true);
   assert.strictEqual(snapshot.musicSources.qq.circuit.open, true);
+  assert.strictEqual(snapshot.musicSources.qq.playbackAuth.playbackKeyReady, true);
+  assert.strictEqual(snapshot.musicSources.qq.playbackAuth.musicKey.present, true);
   assert.strictEqual(snapshot.playback.consecutiveFailures, 2);
   assert.strictEqual(snapshot.playback.memory.blockedCount, 4);
 }

@@ -19,6 +19,7 @@ async function run() {
   assert.strictEqual(result.track.id, 'good');
   assert.deepStrictEqual(result.remaining.map(item => item.id), ['later']);
   assert.deepStrictEqual(result.skipped.map(item => item.id), ['bad']);
+  assert.strictEqual(result.skipped[0].playbackFailureReason, '音源暂时不可用');
   assert.deepStrictEqual(calls, ['bad', 'good']);
 
   const exhausted = await playability.pickPlayableTrack({
@@ -42,6 +43,7 @@ async function run() {
   });
   assert.strictEqual(skippedBlocked.track.id, 'ok');
   assert.deepStrictEqual(skippedBlocked.skipped.map(item => item.id), ['blocked']);
+  assert.strictEqual(skippedBlocked.skipped[0].playbackFailureReason, '已被本地播放记忆临时跳过');
   assert.deepStrictEqual(blockedCalls, ['ok']);
 
   const fallbackCalls = [];

@@ -8,6 +8,8 @@ const QQ_URL_CACHE_MS = Number(process.env.QQ_URL_CACHE_MS || 5 * 60 * 1000);
 const QQ_UNAVAILABLE_CACHE_MS = Number(process.env.QQ_UNAVAILABLE_CACHE_MS || 15 * 60 * 1000);
 const QQ_DEBUG_URL = process.env.QQ_DEBUG_URL === '1';
 const QQ_COOKIE_HEALTH_THRESHOLD = Number(process.env.QQ_COOKIE_HEALTH_THRESHOLD || 3);
+const QQ_STABLE_QUALITY_THRESHOLD = Number(process.env.QQ_STABLE_QUALITY_THRESHOLD || 2);
+const QQ_STABLE_QUALITY_COOLDOWN_MS = Number(process.env.QQ_STABLE_QUALITY_COOLDOWN_MS || 20 * 60 * 1000);
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -17,6 +19,26 @@ const HEADERS = {
 
 function getQQCookie() {
   return process.env.QQ_MUSIC_COOKIE || '';
+}
+
+function splitCookie(cookie = '') {
+  return String(cookie)
+    .split(';')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const index = item.indexOf('=');
+      return index >= 0 ? [item.slice(0, index), item.slice(index + 1)] : [item, ''];
+    });
+}
+
+function cookieValue(cookie, ...names) {
+  const pairs = splitCookie(cookie);
+  for (const name of names) {
+    const found = pairs.find(([key]) => key === name);
+    if (found && found[1]) return found[1];
+  }
+  return '';
 }
 
 const circuit = {
@@ -33,6 +55,12 @@ const cookieHealth = {
   lastReason: '',
   lastAt: null
 };
+const qualityStrategy = {
+  consecutiveHighQualityMisses: 0,
+  preferStableUntil: 0,
+  lastReason: '',
+  lastAt: null
+};
 
 const QQ_QUALITY_FALLBACKS = [
   { quality: 'M800', ext: 'mp3' },
@@ -42,6 +70,68 @@ const QQ_QUALITY_FALLBACKS = [
   { quality: 'C128', ext: 'm4a' }
 ];
 
+const QQ_STABLE_QUALITY_ORDER = ['M128', 'C128', 'C400', 'M500', 'M800'];
+
+function qualityByName(name) {
+  return QQ_QUALITY_FALLBACKS.find(item => item.quality === name);
+}
+
+function getQualityStrategyState(now = Date.now()) {
+  return {
+    preferStable: qualityStrategy.preferStableUntil > now,
+    preferStableUntil: qualityStrategy.preferStableUntil,
+    remainingMs: Math.max(0, qualityStrategy.preferStableUntil - now),
+    consecutiveHighQualityMisses: qualityStrategy.consecutiveHighQualityMisses,
+    threshold: QQ_STABLE_QUALITY_THRESHOLD,
+    cooldownMs: QQ_STABLE_QUALITY_COOLDOWN_MS,
+    lastReason: qualityStrategy.lastReason,
+    lastAt: qualityStrategy.lastAt
+  };
+}
+
+function getQualityFallbacksForCurrentStrategy(now = Date.now()) {
+  if (!getQualityStrategyState(now).preferStable) return QQ_QUALITY_FALLBACKS;
+  return QQ_STABLE_QUALITY_ORDER.map(qualityByName).filter(Boolean);
+}
+
+function resetQualityStrategy() {
+  qualityStrategy.consecutiveHighQualityMisses = 0;
+  qualityStrategy.preferStableUntil = 0;
+  qualityStrategy.lastReason = '';
+  qualityStrategy.lastAt = null;
+}
+
+function isSuccessfulQualityAttempt(item = {}) {
+  return item.status === 200 || item.status === 206 || /CDN HTTP (200|206)/.test(String(item.reason || ''));
+}
+
+function recordQualityStrategyFromAttempts(attempts = [], now = Date.now()) {
+  const validAttempts = attempts.filter(item => item?.quality);
+  const successful = validAttempts.find(isSuccessfulQualityAttempt);
+  if (successful && ['M800', 'M500'].includes(successful.quality)) {
+    resetQualityStrategy();
+    return getQualityStrategyState(now);
+  }
+
+  const highMisses = validAttempts.filter(item =>
+    ['M800', 'M500', 'C400'].includes(item.quality) && item.reason === 'empty purl'
+  );
+  const stableWorked = validAttempts.some(item =>
+    ['M128', 'C128'].includes(item.quality) && isSuccessfulQualityAttempt(item)
+  );
+  const highPermissionMiss = highMisses.length >= 2 && (stableWorked || validAttempts.length >= 3);
+
+  if (highPermissionMiss) {
+    qualityStrategy.consecutiveHighQualityMisses += 1;
+    qualityStrategy.lastReason = summarizeQualityAttempts(highMisses);
+    qualityStrategy.lastAt = new Date(now).toISOString();
+    if (qualityStrategy.consecutiveHighQualityMisses >= QQ_STABLE_QUALITY_THRESHOLD) {
+      qualityStrategy.preferStableUntil = now + QQ_STABLE_QUALITY_COOLDOWN_MS;
+    }
+  }
+  return getQualityStrategyState(now);
+}
+
 function summarizeQualityAttempts(attempts = []) {
   return attempts
     .filter(item => item?.quality)
@@ -49,14 +139,64 @@ function summarizeQualityAttempts(attempts = []) {
     .join('; ');
 }
 
+function reasonText(attempts = []) {
+  return attempts
+    .map(item => String(item && item.reason || ''))
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function classifyPlaybackIssue({
+  cookieConfigured = Boolean(getQQCookie()),
+  playbackKeyReady = getPlaybackAuthStatus().playbackKeyReady,
+  result = '',
+  attempts = []
+} = {}) {
+  const validAttempts = attempts.filter(item => item && item.quality);
+  if (result === 'success' || validAttempts.some(isSuccessfulQualityAttempt)) {
+    return { category: 'playable', action: 'use_url' };
+  }
+  const text = reasonText(validAttempts);
+  const allEmptyPurl = validAttempts.length > 0 && validAttempts.every(item => item.reason === 'empty purl');
+  if (!cookieConfigured) return { category: 'missing_login', action: 'login' };
+  if (!playbackKeyReady) return { category: 'missing_playback_auth', action: 'refresh_login' };
+  if (/trial|free trial|试听/.test(text)) return { category: 'trial_only', action: 'switch_source' };
+  if (/vip|member|membership|pay|paid|purchase|会员|付费|购买/.test(text)) {
+    return { category: 'membership_insufficient', action: 'upgrade_or_switch_source' };
+  }
+  if (/copyright|版权|unavailable|not playable/.test(text)) {
+    return { category: 'copyright_unavailable', action: 'switch_source' };
+  }
+  if (/(http\s*(401|403)|auth|login|cookie|鉴权|登录|未登录|过期|失效)/i.test(text)) {
+    return { category: 'cookie_expired', action: 'refresh_login' };
+  }
+  if (/cdn|http\s*\d{3}/i.test(text)) return { category: 'cdn_rejected', action: 'switch_source' };
+  if (allEmptyPurl) return { category: 'membership_insufficient', action: 'switch_source' };
+  return { category: 'unknown', action: 'retry_or_switch_source' };
+}
+
+function enrichUrlAttempt(attempt) {
+  if (!attempt) return null;
+  const auth = getPlaybackAuthStatus();
+  const issue = classifyPlaybackIssue({
+    cookieConfigured: auth.configured,
+    playbackKeyReady: auth.playbackKeyReady,
+    result: attempt.result,
+    attempts: attempt.attempts || []
+  });
+  return { ...attempt, category: issue.category, action: issue.action };
+}
+
 function rememberUrlAttempt(songmid, attempts, result = 'failed') {
-  recentUrlAttempts.unshift({
+  const attempt = {
     at: new Date().toISOString(),
     songmid,
     result,
     summary: summarizeQualityAttempts(attempts),
     attempts: attempts.map(item => ({ ...item }))
-  });
+  };
+  recentUrlAttempts.unshift(enrichUrlAttempt(attempt));
   if (recentUrlAttempts.length > 20) recentUrlAttempts.length = 20;
 }
 
@@ -87,6 +227,7 @@ function resetRuntimeState() {
   recentUrlAttempts.length = 0;
   resetCircuit();
   resetCookieHealth();
+  resetQualityStrategy();
 }
 
 function getCookieHealth() {
@@ -143,6 +284,8 @@ function getCircuitState() {
     lastReason: circuit.lastReason,
     threshold: QQ_CIRCUIT_THRESHOLD,
     cooldownMs: QQ_CIRCUIT_COOLDOWN_MS,
+    qualityStrategy: getQualityStrategyState(),
+    latestUrlAttempt: recentUrlAttempts[0] || null,
     recentUrlAttempts: recentUrlAttempts.slice(0, 10),
     unavailable: Array.from(unavailableCache.entries()).map(([songmid, entry]) => ({
       songmid,
@@ -173,8 +316,40 @@ function qqGtk(cookie) {
 }
 
 function extractUin(cookie) {
-  const m = cookie.match(/\buin=o?(\d+)/i) || cookie.match(/\bQQ=(\d+)/i);
-  return m ? m[1] : '0';
+  const raw = cookieValue(cookie, 'uin', 'qqmusic_uin', 'wxuin', 'p_uin', 'QQ');
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits.replace(/^0+/, '') || digits || '0';
+}
+
+function qqMusicKey(cookie = getQQCookie()) {
+  return cookieValue(
+    cookie,
+    'qm_keyst',
+    'qqmusic_key',
+    'music_key',
+    'p_skey',
+    'skey',
+    'psrf_qqaccess_token',
+    'psrf_qqrefresh_token',
+    'wxrefresh_token',
+    'wxskey'
+  );
+}
+
+function qqPlaybackKey(cookie = getQQCookie()) {
+  return cookieValue(cookie, 'qm_keyst', 'qqmusic_key', 'music_key', 'wxskey');
+}
+
+function getPlaybackAuthStatus(cookie = getQQCookie()) {
+  const musicKey = qqMusicKey(cookie);
+  const playbackKey = qqPlaybackKey(cookie);
+  return {
+    configured: Boolean(cookie),
+    uin: extractUin(cookie),
+    musicKey: { present: Boolean(musicKey), length: musicKey.length },
+    playbackKeyReady: Boolean(playbackKey),
+    playbackKey: { present: Boolean(playbackKey), length: playbackKey.length }
+  };
 }
 
 function guid() {
@@ -298,12 +473,13 @@ async function getSongUrl(songmid, mediaMid = '') {
 
   const uin = extractUin(cookie);
   const g   = guid();
+  const musicKey = qqMusicKey(cookie);
   let lastError = '';
   const qualityAttempts = [];
 
   // Try formats in order; probe CDN before returning to avoid silent 404s
   // M800/M500 = 超级会员; C400 = 绿钻可能可用; M128/C128 = 普通会员可用
-  for (const { quality, ext } of QQ_QUALITY_FALLBACKS) {
+  for (const { quality, ext } of getQualityFallbacksForCurrentStrategy()) {
     const filename = buildQQFilename(songmid, mediaMid, quality, ext);
     try {
       const body = {
@@ -320,7 +496,13 @@ async function getSongUrl(songmid, mediaMid = '') {
             platform:  '20'
           }
         },
-        comm: { uin, format: 'json', ct: 24, cv: 0 }
+        comm: {
+          uin,
+          format: 'json',
+          ct: musicKey ? 19 : 24,
+          cv: 0,
+          ...(musicKey ? { authst: musicKey } : {})
+        }
       };
 
       const res = await axios.post(
@@ -355,6 +537,7 @@ async function getSongUrl(songmid, mediaMid = '') {
         resetCookieHealth();
         urlCache.set(songmid, { url, expiresAt: Date.now() + QQ_URL_CACHE_MS });
         qualityAttempts.push({ quality, reason: `CDN HTTP ${probe.status}`, status: probe.status });
+        recordQualityStrategyFromAttempts(qualityAttempts);
         rememberUrlAttempt(songmid, qualityAttempts, 'success');
         return url;
       }
@@ -374,6 +557,7 @@ async function getSongUrl(songmid, mediaMid = '') {
     expiresAt: Date.now() + QQ_UNAVAILABLE_CACHE_MS
   });
   recordCookieHealthFromAttempts(qualityAttempts);
+  recordQualityStrategyFromAttempts(qualityAttempts);
   rememberUrlAttempt(songmid, qualityAttempts, 'failed');
   logger.warn(`QQ Music 候选暂不可播，已跳过 (songmid: ${songmid}, reason: ${failureSummary})`);
   recordCircuitFailure(failureSummary);
@@ -512,13 +696,22 @@ module.exports = {
   resetCircuit,
   resetRuntimeState,
   getCookieHealth,
+  getPlaybackAuthStatus,
   resetCookieHealth,
   recordCookieHealthFromAttempts,
   isEnabled: () => !!getQQCookie(),
   getQQCookie,
   extractUin,
+  qqMusicKey,
+  qqPlaybackKey,
   mediaMidFromSong,
   buildQQFilename,
   QQ_QUALITY_FALLBACKS,
-  summarizeQualityAttempts
+  QQ_STABLE_QUALITY_ORDER,
+  getQualityStrategyState,
+  getQualityFallbacksForCurrentStrategy,
+  resetQualityStrategy,
+  recordQualityStrategyFromAttempts,
+  summarizeQualityAttempts,
+  classifyPlaybackIssue
 };

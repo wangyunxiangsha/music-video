@@ -19,6 +19,12 @@ function track(id, name = id) {
   assert.strictEqual(result.skippedCount, 3);
   assert.match(result.playbackNotice, /已跳过 3 首暂时打不开的候选/);
   assert.match(result.playbackNotice, /相似/);
+  assert.match(result.track.playbackSwitchReason, /已跳过 3 首暂时打不开的候选/);
+  assert.deepStrictEqual(result.track.playbackSkippedCandidates.map(item => item.name), [
+    '我一直都在',
+    'Jar Of Love',
+    'This Is Gospel'
+  ]);
 }
 
 {

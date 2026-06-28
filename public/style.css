@@ -1360,39 +1360,90 @@ footer button,
   opacity: .62;
 }
 
-.qq-login-panel {
+.account-status-panel,
+.qq-login-panel,
+.netease-login-panel {
   display: grid;
   gap: 9px;
   padding-top: 12px;
   border-top: 1px solid rgba(255,255,255,.08);
 }
 
-.qq-login-head {
+.account-status-head,
+.qq-login-head,
+.netease-login-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
 }
 
+.account-status-head span,
 .qq-login-head span,
-.qq-login-status {
+.qq-login-status,
+.netease-login-head span,
+.netease-login-status {
   color: var(--muted);
   font-size: 10px;
   letter-spacing: 1.2px;
 }
 
-.qq-login-head strong {
+.account-status-head strong,
+.qq-login-head strong,
+.netease-login-head strong {
   color: var(--text);
   font-size: 12px;
 }
 
-.qq-login-actions {
+.account-status-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.qq-login-actions button {
+.account-status-item {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 5px;
+  background: rgba(255,255,255,.035);
+}
+
+.account-status-item span,
+.account-status-item em {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.account-status-item strong {
+  display: block;
+  margin: 3px 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.account-status-item.ok { border-color: rgba(49,242,162,.26); }
+.account-status-item.warn { border-color: rgba(239,190,116,.36); }
+.account-status-item.missing { border-color: rgba(255,255,255,.12); opacity: .78; }
+
+.account-status-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.qq-login-actions,
+.netease-login-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.qq-login-actions button,
+.netease-login-actions button {
   min-width: 0;
   height: 31px;
   border: 1px solid rgba(255,255,255,.1);
@@ -1406,18 +1457,21 @@ footer button,
   letter-spacing: .6px;
 }
 
-.qq-login-actions button:hover {
+.qq-login-actions button:hover,
+.netease-login-actions button:hover {
   color: #06110d;
   background: var(--green);
   border-color: transparent;
 }
 
-.qq-login-actions button:disabled {
+.qq-login-actions button:disabled,
+.netease-login-actions button:disabled {
   cursor: wait;
   opacity: .62;
 }
 
-.qq-login-qr {
+.qq-login-qr,
+.netease-login-qr {
   width: 148px;
   height: 148px;
   padding: 8px;
@@ -1426,7 +1480,8 @@ footer button,
   justify-self: center;
 }
 
-.qq-login-status {
+.qq-login-status,
+.netease-login-status {
   min-height: 14px;
   line-height: 1.4;
 }
