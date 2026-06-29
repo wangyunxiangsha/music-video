@@ -19,7 +19,7 @@ async function run() {
   assert.strictEqual(result.track.id, 'good');
   assert.deepStrictEqual(result.remaining.map(item => item.id), ['later']);
   assert.deepStrictEqual(result.skipped.map(item => item.id), ['bad']);
-  assert.strictEqual(result.skipped[0].playbackFailureReason, '音源暂时不可用');
+  assert.strictEqual(result.skipped[0].playbackFailureReason, playability.UNAVAILABLE_REASON);
   assert.deepStrictEqual(calls, ['bad', 'good']);
 
   const exhausted = await playability.pickPlayableTrack({
@@ -43,7 +43,7 @@ async function run() {
   });
   assert.strictEqual(skippedBlocked.track.id, 'ok');
   assert.deepStrictEqual(skippedBlocked.skipped.map(item => item.id), ['blocked']);
-  assert.strictEqual(skippedBlocked.skipped[0].playbackFailureReason, '已被本地播放记忆临时跳过');
+  assert.strictEqual(skippedBlocked.skipped[0].playbackFailureReason, playability.BLOCKED_REASON);
   assert.deepStrictEqual(blockedCalls, ['ok']);
 
   const fallbackCalls = [];
@@ -68,6 +68,29 @@ async function run() {
   });
   assert.strictEqual(primaryWins.track.id, 'primary');
   assert.deepStrictEqual(primaryWins.remaining.map(item => item.id), ['later']);
+
+  const precheckCalls = [];
+  const prechecked = await playability.precheckPlayableQueue({
+    playlist: [
+      track('bad-a'),
+      track('good-a'),
+      track('blocked'),
+      track('bad-b'),
+      track('good-b'),
+      track('good-c'),
+      track('later')
+    ],
+    targetCount: 3,
+    maxAttempts: 6,
+    isBlocked: item => item.id === 'blocked',
+    resolveUrl: async (item) => {
+      precheckCalls.push(item.id);
+      return item.id.startsWith('good') ? 'https://ok.example/audio.mp3' : null;
+    }
+  });
+  assert.deepStrictEqual(prechecked.playlist.map(item => item.id), ['good-a', 'good-b', 'good-c', 'later']);
+  assert.deepStrictEqual(prechecked.skipped.map(item => item.id), ['bad-a', 'blocked', 'bad-b']);
+  assert.deepStrictEqual(precheckCalls, ['bad-a', 'good-a', 'bad-b', 'good-b', 'good-c']);
 
   console.log('playability tests passed');
 }

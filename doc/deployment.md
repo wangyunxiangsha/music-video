@@ -61,6 +61,17 @@ Claudio FM 不重新分发音乐，不提供下载入口，不把平台音频保
 5. 如果网易云只返回 `<=35s` 试听片段，先在 `SET` 面板执行网易云扫码登录；登录后仍不可播，通常是账号权益、地区版权或单曲限制。
 6. 手动编辑 `.env` 里的 `NETEASE_COOKIE` 或 `QQ_MUSIC_COOKIE` 后需要重启服务；通过 `SET` 面板扫码刷新会立即更新当前 Node 进程。
 
+## 队列预检查
+
+生成或重建待播队列后，服务端会默认预先检查队列前 5 首是否能拿到可播放地址。不可播、已被播放记忆短期屏蔽、`empty purl` 或 CDN 拒绝的候选会被跳过，并用后面的歌曲回填队列前部，减少播放时才失败的情况。
+
+```env
+PLAYBACK_QUEUE_PRECHECK_COUNT=5
+PLAYBACK_QUEUE_PRECHECK_ATTEMPTS=12
+```
+
+`PLAYBACK_QUEUE_PRECHECK_COUNT` 控制要保证前几首尽量可播，设为 `0` 可关闭预检查；`PLAYBACK_QUEUE_PRECHECK_ATTEMPTS` 控制为了填满前部队列最多探测多少个候选。数值越大越稳，但生成队列时等待时间也会更长。
+
 ### QQ 音乐扫码刷新
 
 `SET` 面板里的“QQ 音乐登录”可以启动扫码刷新流程。这个功能通过可选的 Python helper 调用 `qqmusic-api-python` 获取新的 `musicid/musickey`，成功后会自动写回 `.env` 的 `QQ_MUSIC_COOKIE`，并立即更新当前 Node 进程里的运行时 Cookie。

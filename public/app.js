@@ -87,6 +87,8 @@
   const qqLoginQr = $('qq-login-qr');
   const qqLoginStatus = $('qq-login-status');
   const accountStatusList = $('account-status-list');
+  const accountStatusDiagnosisEl = $('account-status-diagnosis');
+  const accountStatusRefresh = $('account-status-refresh');
   const neteaseLoginStart = $('netease-login-start');
   const neteaseLoginCancel = $('netease-login-cancel');
   const neteaseLoginQr = $('netease-login-qr');
@@ -780,6 +782,21 @@
     ];
   }
 
+  function accountStatusDiagnosis(data = {}) {
+    const qqLogin = data.qq?.login?.state || 'missing';
+    const qqPlayback = data.qq?.playback?.state || 'missing';
+    const qqCookie = data.qq?.cookie?.state || 'missing';
+    const neteaseLogin = data.netease?.login?.state || 'missing';
+    const neteasePlayback = data.netease?.playback?.state || 'missing';
+
+    if (qqLogin !== 'ok') return '建议：先扫码刷新 QQ 音乐登录，再重新检测播放授权。';
+    if (qqPlayback !== 'ok') return '建议：QQ 已登录但缺少播放授权，优先扫码刷新 QQ；仍失败时按账号权益或版权限制处理。';
+    if (qqCookie !== 'ok') return '建议：QQ Cookie 有过期信号，扫码刷新后会清空旧失败缓存。';
+    if (neteaseLogin !== 'ok') return '建议：网易云未登录，遇到试听片段时先扫码登录网易云。';
+    if (neteasePlayback !== 'ok') return '建议：网易云可播状态异常，优先检查账号权益和地区版权。';
+    return '状态良好：双平台登录和播放授权看起来正常。';
+  }
+
   function renderAccountStatus(data = {}) {
     if (!accountStatusList) return;
     const items = accountStatusItems(data);
@@ -790,15 +807,23 @@
         <em>${escapeHtml(entry.message || '')}</em>
       </div>
     `).join('');
+    if (accountStatusDiagnosisEl) {
+      accountStatusDiagnosisEl.textContent = accountStatusDiagnosis(data);
+    }
   }
 
   async function refreshAccountStatus() {
     if (!accountStatusList) return;
+    if (accountStatusRefresh) accountStatusRefresh.disabled = true;
+    if (accountStatusDiagnosisEl) accountStatusDiagnosisEl.textContent = '正在重新检测平台状态...';
     try {
       const res = await fetch('/api/account-status');
       renderAccountStatus(await res.json());
     } catch {
       accountStatusList.innerHTML = '<p class="account-status-empty">账号状态暂时不可用</p>';
+      if (accountStatusDiagnosisEl) accountStatusDiagnosisEl.textContent = '建议：确认本地服务正在运行后再重新检测。';
+    } finally {
+      if (accountStatusRefresh) accountStatusRefresh.disabled = false;
     }
   }
 
@@ -1353,6 +1378,10 @@
         refreshNeteaseLoginStatus();
       }
     };
+  }
+
+  if (accountStatusRefresh) {
+    accountStatusRefresh.addEventListener('click', refreshAccountStatus);
   }
 
   if (settingExternalEnabled) {

@@ -26,12 +26,19 @@ music-video/
 - 启动时如默认端口被占用，应自动尝试后续端口，并在控制台输出实际访问地址
 - 所有 API 返回 JSON 格式
 - 音频 URL 通过服务端代理（避免浏览器 CORS 问题）
-- 网易云和 QQ 音乐 Cookie 只从 `.env` 读取；Cookie 中含 `#` 时必须用引号包裹，避免 dotenv 截断
+- 网易云和 QQ 音乐 Cookie 只从 `.env` 或本机扫码刷新流程写入；Cookie 中含 `#` 时必须用引号包裹，避免 dotenv 截断
+- Cookie、API Key、平台登录信息不得写入 `.claudio` 备份、播放历史、前端状态或可提交文档
+- QQ / 网易云会员歌曲播放必须依赖用户自己的本地账号权益，不得实现绕过平台授权、共享账号授权或下载缓存音频的逻辑
+- 通过 `SET` 面板扫码刷新 Cookie 后，应立即更新当前 Node 进程运行时状态；只有手动编辑 `.env` 时才要求用户重启服务
 - 歌单导入结果统一写入 `data/playlists.json`，前端播放逻辑只消费本地规范化后的歌曲结构
 - 歌曲分类结果统一写入 `data/categories.json` 和 `data/songs-classified.json`
 - 分类数据应保留去重歌曲、来源平台、来源歌单、`playbackIds`，方便后续按类型播放
 - 按类型播放必须通过 `server/categories.js` 读取 `data/categories.json`，不要在主服务中重复解析分类文件
 - 搜索与点歌候选需要按“歌曲名 + 艺人”去重，避免同曲多版本反复进入候选列表
+- 生成或重建自动队列后，应通过 `server/playability.js` 进行轻量预检查；不可播、短期屏蔽、`empty purl` 或 CDN 拒绝候选应尽量在进入前部队列前被跳过
+- 推荐排序信号应集中在 `server/recommendation-mixer.js` 和 `server/recommendation-score.js`，不要在多个业务分支里散落手写权重
+- 推荐解释字段使用 `recommendationReason` / `recommendationScore`；新增解释能力时优先复用这些字段，而不是重新猜测原因
+- 播放历史当前记录的是“歌曲开始播放”事件，除非新增完成度统计，不得在文案或报告里表述为“完整听完”
 - 运行时 DJ 上下文应统一从 `buildRuntimeContext()` 聚合近期播放、自动学习偏好和可选天气信息
 - 天气 API 为可选依赖：优先使用高德 `AMAP_WEATHER_KEY`，OpenWeather 仅作为兜底；未配置天气 Key 时必须静默跳过，不影响播放主流程
 
@@ -49,6 +56,8 @@ music-video/
 - 歌单导入完成后应在 UI 中展示导入摘要和日志，不只显示一句完成提示
 - 播放历史可视化统一消费 `/api/history` 摘要，不在前端直接解析 `data/stats.json`
 - 队列预览统一消费 `/api/queue` 摘要，不在前端复刻后端队列逻辑；删除下一首、重新生成队列、插队点歌必须通过对应队列 API 完成
+- 账号状态统一消费 `/api/account-status`；前端只展示脱敏后的登录、授权、健康和诊断建议，不显示真实 Cookie
+- `SET` 面板中的账号排查操作应是用户触发的刷新 / 检测，不在页面启动时强制弹出扫码登录
 - 顶部 Claudio 头像与 DJ 消息头像使用固定 `public/avatar.jpg`，专辑封面只用于唱片/歌曲展示，不覆盖 DJ 身份头像
 
 ## 设计规范
@@ -83,6 +92,8 @@ music-video/
 ## 安全规范
 - API Keys 存储在 `.env` 文件，不提交到 Git
 - `.env` 已加入 `.gitignore`
+- 不在日志、接口响应、备份文件或文档中输出完整 Cookie / token / API Key
+- 本项目面向个人本地电台使用，不提供音乐下载、二次分发、账号共享或绕过会员权益限制的能力
 - 音频代理时设置合理的 timeout（10s）
 - 用户输入进行基本长度限制（消息 ≤ 500 字）
 

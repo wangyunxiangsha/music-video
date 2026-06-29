@@ -23,6 +23,7 @@ const queue     = require('./queue');
 const dailyStation = require('./daily-station');
 const recommendationMixer = require('./recommendation-mixer');
 const recommendationExplainer = require('./recommendation-explainer');
+const recommendationScore = require('./recommendation-score');
 const playability = require('./playability');
 const playbackDiagnostics = require('./playback-diagnostics');
 const playbackMemory = require('./playback-memory');
@@ -44,6 +45,11 @@ const PORT = Number(process.env.PORT || 8080);
 const PORT_RETRY_LIMIT = Number(process.env.PORT_RETRY_LIMIT || 10);
 const TRIAL_CLIP_NEXT_LIMIT = 3;
 const TRIAL_CLIP_NEXT_WINDOW_MS = 45000;
+const PLAYBACK_QUEUE_PRECHECK_COUNT = Math.max(0, Number(process.env.PLAYBACK_QUEUE_PRECHECK_COUNT || 5));
+const PLAYBACK_QUEUE_PRECHECK_ATTEMPTS = Math.max(
+  PLAYBACK_QUEUE_PRECHECK_COUNT,
+  Number(process.env.PLAYBACK_QUEUE_PRECHECK_ATTEMPTS || 12)
+);
 const startedAt = new Date().toISOString();
 const RUNTIME_FILE = path.join(__dirname, '../data/runtime.json');
 const DEFAULT_EXTERNAL_RECOMMEND_RATIO = recommendationMixer.resolveExternalRecommendationRatio({
@@ -248,6 +254,41 @@ async function ensureDailyBriefing(now = new Date()) {
 
 function broadcastQueue() {
   broadcast({ type: 'queue', queue: getQueueState() });
+}
+
+async function precheckPlaybackQueue(nextPlaylist = []) {
+  if (!PLAYBACK_QUEUE_PRECHECK_COUNT || !Array.isArray(nextPlaylist) || !nextPlaylist.length) {
+    return Array.isArray(nextPlaylist) ? nextPlaylist : [];
+  }
+  try {
+    const checked = await playability.precheckPlayableQueue({
+      playlist: nextPlaylist,
+      resolveUrl: resolveSongUrl,
+      targetCount: PLAYBACK_QUEUE_PRECHECK_COUNT,
+      maxAttempts: PLAYBACK_QUEUE_PRECHECK_ATTEMPTS,
+      isBlocked: playbackMemory.isBlocked
+    });
+    if (checked.skipped.length) {
+      logger.warn(`队列预检查跳过 ${checked.skipped.length} 首暂不可播放的候选`);
+    }
+    return checked.playlist;
+  } catch (error) {
+    logger.warn(`队列预检查失败，保留原队列: ${error.message}`);
+    return nextPlaylist;
+  }
+}
+
+function schedulePrecheckPlaybackQueue() {
+  const sourcePlaylist = playlist;
+  precheckPlaybackQueue(sourcePlaylist)
+    .then((checkedPlaylist) => {
+      if (playlist !== sourcePlaylist) return;
+      playlist = checkedPlaylist;
+      broadcastQueue();
+    })
+    .catch((error) => {
+      logger.warn(`队列后台预检查失败: ${error.message}`);
+    });
 }
 
 function trackForPlaybackId(id) {
@@ -609,6 +650,7 @@ async function rebuildUpcomingQueue() {
   }
   if (!pool.length) pool = await buildDefaultQueuePool();
   playlist = queue.rebuildQueue(playbackMemory.preferPlayable(playbackMemory.filterBlocked(pool), 20));
+  playlist = await precheckPlaybackQueue(playlist);
   broadcastQueue();
   return getQueueState();
 }
@@ -663,8 +705,8 @@ function boostPlaylistByTaste(pool, { scene = activeScene } = {}) {
       && !feedbackSignals.blockedArtists.has(artist)
       && !feedbackSignals.blockedCategories.has(category);
   });
-  return recommendationMixer.weightedShuffle(filtered, (track) => {
-    return recommendationMixer.tasteWeightForTrack({
+  const scored = filtered.map(track => {
+    const mixerWeight = recommendationMixer.tasteWeightForTrack({
       track,
       tasteSignals: signals,
       feedbackSignals,
@@ -673,7 +715,18 @@ function boostPlaylistByTaste(pool, { scene = activeScene } = {}) {
       recentArtists,
       artistRepeatMode: activeArtistRepeatMode
     });
+    const signalScore = recommendationScore.scoreTrack(track, {
+      tasteSignals: signals,
+      feedbackSignals,
+      recentArtists,
+      artistRepeatMode: activeArtistRepeatMode
+    });
+    return {
+      track: recommendationScore.annotateRecommendationReason(track, signalScore),
+      weight: Math.max(0.1, mixerWeight + signalScore.weight - 1)
+    };
   });
+  return recommendationMixer.weightedShuffle(scored, item => item.weight).map(item => item.track);
 }
 
 async function buildSmartQueue(localPool, { scene = activeScene, limit = 80 } = {}) {
@@ -746,6 +799,7 @@ async function loadPlaylist() {
     const pool = importer.buildPlaylistPool();
     if (pool.length > 0) {
       playlist = await buildSmartQueue(pool, { limit: 120 });
+      schedulePrecheckPlaybackQueue();
       logger.info(`✓ 加载智能队列 ${playlist.length} 首（外部推荐 ${Math.round(currentExternalRecommendationRatio() * 100)}%）`);
       return;
     }
@@ -758,6 +812,7 @@ async function loadPlaylist() {
     const userTracks = await loadUserPlaylistsIntoPool();
     if (userTracks.length > 0) {
       playlist = await buildSmartQueue(userTracks, { limit: 120 });
+      schedulePrecheckPlaybackQueue();
       logger.info(`✓ 用户歌单加载完成，共 ${playlist.length} 首`);
       return;
     }
@@ -771,6 +826,7 @@ async function loadPlaylist() {
     if (songs.length > 0) {
       const playable = songs.filter(isPlayable);
       playlist = (playable.length > 5 ? playable : songs).slice(0, 50);
+      schedulePrecheckPlaybackQueue();
       logger.info(`✓ 加载了 ${playlist.length} 首热门歌曲`);
       return;
     }

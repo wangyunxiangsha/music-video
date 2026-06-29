@@ -386,6 +386,8 @@ QQ_CIRCUIT_THRESHOLD=3
 QQ_CIRCUIT_COOLDOWN_MS=600000
 QQ_UNAVAILABLE_CACHE_MS=900000
 QQ_COOKIE_HEALTH_THRESHOLD=3
+PLAYBACK_QUEUE_PRECHECK_COUNT=5
+PLAYBACK_QUEUE_PRECHECK_ATTEMPTS=12
 # QQ_DEBUG_URL=1
 ```
 
@@ -395,7 +397,11 @@ QQ_COOKIE_HEALTH_THRESHOLD=3
 | `QQ_CIRCUIT_COOLDOWN_MS` | 熔断持续时间，默认 10 分钟 |
 | `QQ_UNAVAILABLE_CACHE_MS` | 单首 QQ 歌曲失败后的短期跳过缓存，默认 15 分钟 |
 | `QQ_COOKIE_HEALTH_THRESHOLD` | 连续多少次 empty purl / 鉴权失败后提示 Cookie 疑似过期，默认 3 |
+| `PLAYBACK_QUEUE_PRECHECK_COUNT` | 每次生成队列后预先检查前几首是否可播，默认 5；设为 `0` 可关闭 |
+| `PLAYBACK_QUEUE_PRECHECK_ATTEMPTS` | 为了填满预检队列最多探测多少个候选，默认 12 |
 | `QQ_DEBUG_URL` | 设为 `1` 时输出每个 QQ 音质格式的详细 probe 日志 |
+
+生成或重建待播队列时，Claudio 会预先探测队列前几首，跳过已知不可播、`empty purl`、CDN 拒绝或试听片段风险较高的候选，并用后面的歌曲回填，减少“播了才发现打不开”的情况。
 
 调试接口：
 

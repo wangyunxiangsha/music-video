@@ -1,5 +1,12 @@
 'use strict';
 
+const BLOCKED_REASON = 'playback_memory_blocked';
+const UNAVAILABLE_REASON = 'audio_source_unavailable';
+
+function trackKey(candidate) {
+  return `${candidate?.source || ''}:${candidate?.id || candidate?.name || ''}`;
+}
+
 async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolveUrl, maxAttempts = 8, isBlocked = () => false } = {}) {
   const queue = [
     ...(Array.isArray(playlist) ? playlist : []).map(track => ({ track, fallback: false })),
@@ -12,7 +19,7 @@ async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolve
   for (let i = 0; i < attempts && queue.length; i += 1) {
     const item = queue.shift();
     const candidate = item.track;
-    const key = `${candidate?.source || ''}:${candidate?.id || candidate?.name || ''}`;
+    const key = trackKey(candidate);
     if (key && seen.has(key)) {
       i -= 1;
       continue;
@@ -21,7 +28,7 @@ async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolve
     if (isBlocked(candidate)) {
       skipped.push({
         ...candidate,
-        playbackFailureReason: '已被本地播放记忆临时跳过'
+        playbackFailureReason: BLOCKED_REASON
       });
       i -= 1;
       continue;
@@ -34,11 +41,71 @@ async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolve
     } catch {}
     skipped.push({
       ...candidate,
-      playbackFailureReason: '音源暂时不可用'
+      playbackFailureReason: UNAVAILABLE_REASON
     });
   }
 
   return { track: null, remaining: queue.filter(entry => !entry.fallback).map(entry => entry.track), skipped };
 }
 
-module.exports = { pickPlayableTrack };
+async function precheckPlayableQueue({
+  playlist = [],
+  resolveUrl,
+  targetCount = 5,
+  maxAttempts = 10,
+  isBlocked = () => false
+} = {}) {
+  const source = Array.isArray(playlist) ? playlist : [];
+  const target = Math.max(1, Number(targetCount) || 5);
+  const attempts = Math.max(target, Number(maxAttempts) || 10);
+  const checked = [];
+  const skipped = [];
+  const seen = new Set();
+  let cursor = 0;
+  let probes = 0;
+
+  while (cursor < source.length && checked.length < target && probes < attempts) {
+    const candidate = source[cursor];
+    cursor += 1;
+    const key = trackKey(candidate);
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    if (isBlocked(candidate)) {
+      skipped.push({
+        ...candidate,
+        playbackFailureReason: BLOCKED_REASON
+      });
+      continue;
+    }
+    probes += 1;
+    try {
+      const url = await resolveUrl(candidate);
+      if (url) {
+        checked.push(candidate);
+        continue;
+      }
+    } catch {}
+    skipped.push({
+      ...candidate,
+      playbackFailureReason: UNAVAILABLE_REASON
+    });
+  }
+
+  const remaining = source.slice(cursor).filter(track => {
+    const key = trackKey(track);
+    return !key || !seen.has(key);
+  });
+
+  return {
+    playlist: [...checked, ...remaining],
+    skipped,
+    checkedCount: checked.length
+  };
+}
+
+module.exports = {
+  BLOCKED_REASON,
+  UNAVAILABLE_REASON,
+  pickPlayableTrack,
+  precheckPlayableQueue
+};

@@ -1373,7 +1373,7 @@ footer button,
 .qq-login-head,
 .netease-login-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
@@ -1393,6 +1393,31 @@ footer button,
 .netease-login-head strong {
   color: var(--text);
   font-size: 12px;
+}
+
+.account-status-head button {
+  min-width: 58px;
+  height: 28px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 5px;
+  background: rgba(255,255,255,.045);
+  color: var(--soft);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .6px;
+}
+
+.account-status-head button:hover {
+  color: #06110d;
+  background: var(--green);
+  border-color: transparent;
+}
+
+.account-status-head button:disabled {
+  cursor: wait;
+  opacity: .6;
 }
 
 .account-status-list {
@@ -1433,6 +1458,17 @@ footer button,
   margin: 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.account-status-diagnosis {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid rgba(239,190,116,.22);
+  border-radius: 5px;
+  background: rgba(239,190,116,.07);
+  color: var(--soft);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .qq-login-actions,

@@ -13,14 +13,19 @@ assert.match(server, /accountStatus\.buildAccountStatus/);
 
 assert.match(html, /id="account-status-panel"/);
 assert.match(html, /id="account-status-list"/);
+assert.match(html, /id="account-status-diagnosis"/);
+assert.match(html, /id="account-status-refresh"/);
 
 assert.match(js, /fetch\('\/api\/account-status'\)/);
 assert.match(js, /function renderAccountStatus/);
+assert.match(js, /function accountStatusDiagnosis/);
 assert.match(js, /refreshAccountStatus/);
+assert.match(js, /accountStatusRefresh\.addEventListener\('click', refreshAccountStatus\)/);
 
 assert.match(css, /\.account-status-panel/);
 assert.match(css, /\.account-status-item\.ok/);
 assert.match(css, /\.account-status-item\.warn/);
 assert.match(css, /\.account-status-item\.missing/);
+assert.match(css, /\.account-status-diagnosis/);
 
 console.log('account status UI tests passed');
