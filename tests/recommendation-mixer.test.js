@@ -148,6 +148,41 @@ async function run() {
   assert.strictEqual(external[0].sourceReason, '林俊杰');
   assert.deepStrictEqual(external.map(item => item.id), ['n1']);
 
+  const qqFirst = await mixer.buildExternalRecommendationPool({
+    music: {
+      async searchSongs() {
+        return [track('n-trial', 'Netease Trial', 'QQ Preferred Artist', { privilege: { pl: 1 } })];
+      }
+    },
+    qqmusic: {
+      isEnabled: () => true,
+      async searchSongs() {
+        return [track('qq:full', 'QQ Full', 'QQ Preferred Artist', { source: 'qq', privilege: { pl: 1 } })];
+      }
+    },
+    tasteSignals: { topArtists: [{ name: 'QQ Preferred Artist', count: 3 }], topCategories: [], recentSongs: [] },
+    limit: 4
+  });
+  assert.deepStrictEqual(qqFirst.map(item => item.id), ['qq:full']);
+  assert.strictEqual(qqFirst[0].source, 'qq');
+
+  const neteaseFallback = await mixer.buildExternalRecommendationPool({
+    music: {
+      async searchSongs() {
+        return [track('n-ok', 'Netease OK', 'Fallback Artist', { privilege: { pl: 1 } })];
+      }
+    },
+    qqmusic: {
+      isEnabled: () => true,
+      async searchSongs() {
+        return [];
+      }
+    },
+    tasteSignals: { topArtists: [{ name: 'Fallback Artist', count: 3 }], topCategories: [], recentSongs: [] },
+    limit: 1
+  });
+  assert.deepStrictEqual(neteaseFallback.map(item => item.id), ['n-ok']);
+
   const seeds = mixer.querySeeds({
     tasteSignals: {
       topArtists: [{ name: '林俊杰', count: 26 }, { name: '许嵩', count: 18 }],

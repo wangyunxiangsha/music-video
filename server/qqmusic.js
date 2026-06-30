@@ -16,6 +16,8 @@ const HEADERS = {
   'Referer': 'https://y.qq.com',
   'Origin': 'https://y.qq.com'
 };
+const QQ_MUSICU_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
+const QQ_SMARTBOX_URL = 'https://c.y.qq.com/splcloud/fcgi-bin/smartbox_new.fcg';
 
 function getQQCookie() {
   return process.env.QQ_MUSIC_COOKIE || '';
@@ -60,6 +62,14 @@ const qualityStrategy = {
   preferStableUntil: 0,
   lastReason: '',
   lastAt: null
+};
+const searchHealth = {
+  state: 'unknown',
+  lastQuery: '',
+  lastReason: '',
+  lastAt: null,
+  resultCount: 0,
+  message: '尚未检测 QQ 搜索'
 };
 
 const QQ_QUALITY_FALLBACKS = [
@@ -228,6 +238,7 @@ function resetRuntimeState() {
   resetCircuit();
   resetCookieHealth();
   resetQualityStrategy();
+  resetSearchHealth();
 }
 
 function getCookieHealth() {
@@ -352,6 +363,33 @@ function getPlaybackAuthStatus(cookie = getQQCookie()) {
   };
 }
 
+function resetSearchHealth() {
+  searchHealth.state = 'unknown';
+  searchHealth.lastQuery = '';
+  searchHealth.lastReason = '';
+  searchHealth.lastAt = null;
+  searchHealth.resultCount = 0;
+  searchHealth.message = '尚未检测 QQ 搜索';
+}
+
+function recordSearchHealth({ state, query, reason = '', resultCount = 0, message = '' } = {}) {
+  searchHealth.state = state || 'unknown';
+  searchHealth.lastQuery = String(query || '');
+  searchHealth.lastReason = String(reason || '');
+  searchHealth.lastAt = new Date().toISOString();
+  searchHealth.resultCount = Number(resultCount) || 0;
+  searchHealth.message = message || (
+    searchHealth.state === 'ok'
+      ? 'QQ 搜索最近正常'
+      : 'QQ 搜索接口最近失败，点歌会先使用本地 QQ 歌单兜底'
+  );
+  return getSearchHealth();
+}
+
+function getSearchHealth() {
+  return { ...searchHealth };
+}
+
 function guid() {
   return Array.from({ length: 32 }, () =>
     Math.floor(Math.random() * 16).toString(16)
@@ -375,6 +413,7 @@ function buildQQFilename(songmid, mediaMid, quality, ext) {
 // ─── Search ────────────────────────────────────────────────────────────────────
 async function searchSongs(keywords, limit = 10) {
   const cookie = getQQCookie();
+  const diagnostics = {};
   try {
     // Use the newer search API
     const body = {
@@ -392,21 +431,146 @@ async function searchSongs(keywords, limit = 10) {
     };
 
     const res = await axios.post(
-      'https://u.y.qq.com/cgi-bin/musicu.fcg',
+      QQ_MUSICU_URL,
       body,
       { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 }
     );
 
     const list = res.data?.req?.data?.body?.song?.list || [];
-    if (list.length) return list.map(formatSong);
+    if (list.length) {
+      recordSearchHealth({
+        state: 'ok',
+        query: keywords,
+        resultCount: list.length,
+        message: 'QQ 搜索最近正常'
+      });
+      return list.map(formatSong);
+    }
+    const reqCode = res.data?.req?.code;
+    const reqSubcode = res.data?.req?.subcode;
+    diagnostics.newApiReason = reqCode && reqCode !== 0
+      ? `new api code ${reqCode}${reqSubcode ? ` subcode ${reqSubcode}` : ''}`
+      : 'new api empty result';
     // Fall through to fallback if new API returns empty
-  } catch {
+  } catch (e) {
+    diagnostics.newApiReason = `new api ${e.response?.status ? `HTTP ${e.response.status}` : e.message}`;
     // Ignored — fall through to fallback
   }
-  return searchFallback(keywords, limit);
+  const fallback = await searchFallback(keywords, limit, diagnostics);
+  if (fallback.length) {
+    recordSearchHealth({
+      state: 'ok',
+      query: keywords,
+      resultCount: fallback.length,
+      message: 'QQ 搜索最近正常'
+    });
+    return fallback;
+  }
+  const smartbox = await searchSmartboxFallback(keywords, limit, diagnostics);
+  if (smartbox.length) {
+    recordSearchHealth({
+      state: 'ok',
+      query: keywords,
+      reason: 'smartbox fallback ok',
+      resultCount: smartbox.length,
+      message: 'QQ 搜索最近正常'
+    });
+    return smartbox;
+  }
+  const reason = [diagnostics.newApiReason, diagnostics.fallbackReason, diagnostics.smartboxReason].filter(Boolean).join('; ');
+  const failed = Boolean(diagnostics.fallbackReason)
+    || Boolean(diagnostics.smartboxReason)
+    || (diagnostics.newApiReason && diagnostics.newApiReason !== 'new api empty result');
+  recordSearchHealth({
+    state: failed ? 'warn' : 'ok',
+    query: keywords,
+    reason,
+    resultCount: 0,
+    message: failed
+      ? 'QQ 搜索接口最近失败，点歌会先使用本地 QQ 歌单兜底'
+      : 'QQ 搜索最近正常，但没有匹配结果'
+  });
+  return fallback;
 }
 
-async function searchFallback(keywords, limit) {
+function formatSmartboxSong(item = {}) {
+  const mid = item.mid || item.songmid || item.id || '';
+  return {
+    id: `qq:${mid}`,
+    name: item.name || item.title || '',
+    artists: item.singer ? [{ name: item.singer }] : [],
+    album: { name: '', picUrl: '' },
+    _qqmid: mid,
+    _qqMediaMid: '',
+    source: 'qq',
+    privilege: { pl: 1 }
+  };
+}
+
+async function searchSmartboxFallback(keywords, limit, diagnostics = {}) {
+  try {
+    const res = await axios.get(QQ_SMARTBOX_URL, {
+      params: {
+        format: 'json',
+        key: keywords,
+        g_tk: '5381',
+        loginUin: '0',
+        hostUin: '0',
+        inCharset: 'utf8',
+        outCharset: 'utf-8',
+        notice: '0',
+        platform: 'yqq.json',
+        needNewCode: '0'
+      },
+      headers: {
+        'User-Agent': HEADERS['User-Agent'],
+        Referer: 'https://y.qq.com/'
+      },
+      timeout: 8000
+    });
+    const items = res.data?.data?.song?.itemlist || [];
+    const base = items.slice(0, Math.max(1, Math.min(Number(limit) || 6, 10))).map(formatSmartboxSong);
+    const detailed = await Promise.all(base.map(async (song) => {
+      try {
+        return await getSongDetail(song._qqmid, song);
+      } catch (e) {
+    logger.debug(`QQ Music smartbox detail error (${song._qqmid}):`, e.message);
+        return song;
+      }
+    }));
+    const seen = new Set();
+    return detailed.filter(song => {
+      const key = song?._qqmid || song?.id;
+      if (!song?.name || !key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  } catch (e) {
+    logger.debug('QQ Music smartbox search error:', e.message);
+    diagnostics.smartboxReason = `smartbox ${e.response?.status ? `HTTP ${e.response.status}` : e.message}`;
+    return [];
+  }
+}
+
+async function getSongDetail(mid, fallback = {}) {
+  if (!mid) return fallback;
+  const res = await axios.post(
+    QQ_MUSICU_URL,
+    {
+      comm: { ct: 24, cv: 0 },
+      songinfo: {
+        module: 'music.pf_song_detail_svr',
+        method: 'get_song_detail_yqq',
+        param: { song_mid: mid }
+      }
+    },
+    { headers: { ...HEADERS, Cookie: getQQCookie() }, timeout: 8000 }
+  );
+  const track = res.data?.songinfo?.data?.track_info;
+  return track ? formatSong(track, fallback) : fallback;
+}
+
+async function searchFallback(keywords, limit, diagnostics = {}) {
   try {
     const res = await axios.get(
       'https://c.y.qq.com/soso/fcgi-bin/client_search_cp',
@@ -433,23 +597,26 @@ async function searchFallback(keywords, limit) {
       privilege: { pl: 1 }
     }));
   } catch (e) {
-    logger.warn('QQ Music search fallback error:', e.message);
+    logger.debug('QQ Music search fallback error:', e.message);
+    diagnostics.fallbackReason = `fallback ${e.response?.status ? `HTTP ${e.response.status}` : e.message}`;
     return [];
   }
 }
 
-function formatSong(s) {
-  const mid = s.mid || s.id;
+function formatSong(s, fallback = {}) {
+  const mid = s.mid || s.songmid || fallback._qqmid || fallback.mid || s.id;
   const pic = s.album?.mid
     ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${s.album.mid}.jpg`
-    : '';
+    : (fallback.album?.picUrl || '');
   return {
     id:      `qq:${mid}`,
-    name:    s.name,
-    artists: (s.singer || []).map((a) => ({ name: a.name })),
-    album:   { name: s.album?.name || '', picUrl: pic },
+    name:    s.name || fallback.name || '',
+    artists: (s.singer || []).map((a) => ({ name: a.name })).filter(a => a.name).length
+      ? (s.singer || []).map((a) => ({ name: a.name })).filter(a => a.name)
+      : (fallback.artists || []),
+    album:   { name: s.album?.name || fallback.album?.name || '', picUrl: pic },
     _qqmid:  mid,
-    _qqMediaMid: mediaMidFromSong(s),
+    _qqMediaMid: mediaMidFromSong(s) || fallback._qqMediaMid || '',
     source:  'qq',
     privilege: { pl: 1 }
   };
@@ -506,7 +673,7 @@ async function getSongUrl(songmid, mediaMid = '') {
       };
 
       const res = await axios.post(
-        'https://u.y.qq.com/cgi-bin/musicu.fcg',
+        QQ_MUSICU_URL,
         body,
         { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 }
       );
@@ -593,7 +760,7 @@ async function getUserPlaylists(uin) {
       },
       comm: { uin, format: 'json', ct: 24, cv: 0 }
     };
-    const res = await axios.post('https://u.y.qq.com/cgi-bin/musicu.fcg', body,
+    const res = await axios.post(QQ_MUSICU_URL, body,
       { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 });
     const disslist = res.data?.req_0?.data?.disslist || [];
     if (disslist.length) return disslist;
@@ -647,7 +814,7 @@ async function getPlaylistSongs(dissid) {
         },
         comm: { uin: extractUin(cookie), format: 'json', ct: 24, cv: 0 }
       };
-      const res = await axios.post('https://u.y.qq.com/cgi-bin/musicu.fcg', body,
+      const res = await axios.post(QQ_MUSICU_URL, body,
         { headers: { ...HEADERS, Cookie: cookie }, timeout: 8000 });
       const songlist = res.data?.req_0?.data?.songlist || [];
       if (!songlist.length) break;
@@ -697,6 +864,8 @@ module.exports = {
   resetRuntimeState,
   getCookieHealth,
   getPlaybackAuthStatus,
+  getSearchHealth,
+  resetSearchHealth,
   resetCookieHealth,
   recordCookieHealthFromAttempts,
   isEnabled: () => !!getQQCookie(),

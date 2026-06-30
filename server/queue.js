@@ -15,7 +15,8 @@ function compactTrack(track) {
     source: track.source || '',
     recommendationSource: track.recommendationSource || '',
     sourceReason: track.sourceReason || '',
-    recommendationReason: track.recommendationReason || ''
+    recommendationReason: track.recommendationReason || '',
+    recommendationScore: track.recommendationScore
   };
 }
 

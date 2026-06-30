@@ -91,6 +91,7 @@ let activeArtistRepeatMode = stats.getPreference('artistRepeatMode', 'normal');
 let activePort = null;
 let nextRequestInFlight = null;
 let trialClipNextRequests = [];
+let announcementGeneration = 0;
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -254,6 +255,33 @@ async function ensureDailyBriefing(now = new Date()) {
 
 function broadcastQueue() {
   broadcast({ type: 'queue', queue: getQueueState() });
+}
+
+function scheduleTrackAnnouncement(track, systemPromptInput, policy, generation) {
+  const trackId = track?.id;
+  if (!trackId) return;
+
+  Promise.resolve(systemPromptInput)
+    .then((systemPrompt) => ai.generateAnnouncement(track, systemPrompt, policy))
+    .then((message) => {
+      if (generation !== announcementGeneration) return;
+      if (!currentTrack || String(currentTrack.id) !== String(trackId)) return;
+      djMessage = message || '';
+      broadcast({ type: 'djMessage', trackId, djMessage });
+    })
+    .catch((error) => {
+      logger.warn(`DJ 播报后台生成失败: ${error.message}`);
+    });
+}
+
+function prepareTrackAnnouncement(track, systemPromptInput) {
+  policyPlayCount += 1;
+  announcementGeneration += 1;
+  djMessage = '';
+
+  if (djPolicy.shouldAnnounce(activePolicy, policyPlayCount)) {
+    scheduleTrackAnnouncement(track, systemPromptInput, activePolicy, announcementGeneration);
+  }
 }
 
 async function precheckPlaybackQueue(nextPlaylist = []) {
@@ -496,11 +524,70 @@ function rankByArtist(candidates, artistHint) {
   ];
 }
 
+function artistHintsOf(track = {}) {
+  return (track.artists || track.ar || [])
+    .map(item => item?.name || '')
+    .flatMap(name => String(name).split(/[\/、,&，和\s]+/))
+    .map(name => name.trim())
+    .filter(Boolean);
+}
+
+async function resolveQqEquivalentTrack(track) {
+  if (!track || track.source === 'qq' || !qqmusic.isEnabled()) return null;
+  const title = track.name || '';
+  const artistHints = artistHintsOf(track);
+  const artist = artistHints.join(' ');
+  if (!title || !artistHints.length) return null;
+
+  try {
+    const query = `${title} ${artist}`;
+    const qqResults = dedupeSongs(await qqmusic.searchSongs(query, 6));
+    const qqClean = recommendationMixer.preferCleanVersions(qqResults);
+    const qqTitleMatched = recommendationMixer.preferTitleMatches(qqClean, title);
+    const qqArtistMatched = qqTitleMatched.filter(candidate =>
+      artistHints.some(hint => recommendationMixer.preferArtistMatches([candidate], hint).length)
+    );
+    const qqRanked = rankByArtist(qqArtistMatched, artist);
+    for (const candidate of qqRanked.slice(0, 3)) {
+      const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
+      if (url) {
+        return {
+          url,
+          track: {
+            ...candidate,
+            recommendationSource: track.recommendationSource,
+            sourceReason: track.sourceReason,
+            recommendationReason: track.recommendationReason || 'QQ 音乐已有完整版本，已替换网易云试听候选',
+            playbackSwitchReason: 'QQ 音乐已有完整版本，已替换网易云试听候选',
+            playbackSkippedCandidates: [{
+              source: 'netease',
+              reason: '网易云可能只有试听片段，优先改用 QQ 音乐完整版本',
+              name: track.name
+            }]
+          }
+        };
+      }
+    }
+  } catch (error) {
+    logger.debug(`QQ 等价曲目替换失败: ${error.message}`);
+  }
+  return null;
+}
+
 async function resolveSongUrl(track) {
   if (track.source === 'qq') {
     return qqmusic.getSongUrl(track._qqmid, track._qqMediaMid);
   }
+  const qqEquivalent = await resolveQqEquivalentTrack(track);
+  if (qqEquivalent) return qqEquivalent;
   return music.getSongUrl(track.id);
+}
+
+async function resolvePlayableAudio(track) {
+  const resolved = await resolveSongUrl(track);
+  if (!resolved) return null;
+  if (typeof resolved === 'string') return { url: resolved, track };
+  return { url: resolved.url, track: resolved.track || track };
 }
 
 async function switchToSong(songName, systemPrompt) {
@@ -530,6 +617,14 @@ async function findRequestedSong(songName) {
       qqTried = true;
       const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
       if (url) return candidate;
+    }
+
+    const localQqTrack = importer.findLocalQqTrack(requestedTitle, artist);
+    if (localQqTrack) {
+      logger.info(`QQ 本地歌单兜底命中: ${localQqTrack.name}`);
+      qqTried = true;
+      const url = await qqmusic.getSongUrl(localQqTrack._qqmid, localQqTrack._qqMediaMid);
+      if (url) return localQqTrack;
     }
   }
 
@@ -568,10 +663,7 @@ async function findRequestedSong(songName) {
 async function activateTrack(track, systemPrompt, userRequested = false) {
   currentTrack = track;
   stats.savePlay(track);
-  policyPlayCount += 1;
-  djMessage = djPolicy.shouldAnnounce(activePolicy, policyPlayCount)
-    ? await ai.generateAnnouncement(track, systemPrompt, activePolicy)
-    : '';
+  prepareTrackAnnouncement(track, systemPrompt);
   broadcast({
     type: 'track',
     track: currentTrack,
@@ -866,12 +958,7 @@ async function nextTrack({ maxAttempts = 8 } = {}) {
   }
 
   stats.savePlay(currentTrack);
-
-  const systemPrompt = await buildRuntimeContext();
-  policyPlayCount += 1;
-  djMessage = djPolicy.shouldAnnounce(activePolicy, policyPlayCount)
-    ? await ai.generateAnnouncement(currentTrack, systemPrompt, activePolicy)
-    : '';
+  prepareTrackAnnouncement(currentTrack, buildRuntimeContext());
 
   broadcast({
     type: 'track',
@@ -959,6 +1046,18 @@ app.post('/api/playback/failure', async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.post('/api/playback/progress', (req, res) => {
+  const { id, event, position, duration } = req.body || {};
+  const track = id ? knownTrackForPlaybackId(id) : currentTrack;
+  if (!track) return res.status(404).json({ ok: false, reason: 'track_not_found' });
+  try {
+    const saved = stats.savePlaybackProgress({ event, track, position, duration });
+    res.json({ ok: true, event: saved.type });
+  } catch (error) {
+    res.status(400).json({ ok: false, reason: error.message });
   }
 });
 
@@ -1177,6 +1276,14 @@ app.post('/api/next', async (req, res) => {
   const requestTrackId = hasClientTrackId
     ? String(id)
     : (currentTrack ? String(currentTrack.id) : '__none__');
+  if (reason === 'trial_clip' && currentTrack && matchesCurrent) {
+    await handlePlaybackFailure({
+      stage: 'client',
+      reason: 'trial_clip',
+      detail: 'client detected short preview clip',
+      track: currentTrack
+    });
+  }
   if (reason === 'trial_clip' && !canAcceptTrialClipNext()) {
     logger.warn(`限制连续试听片段自动切歌: requestTrack=${requestTrackId}`);
     return res.json({ track: currentTrack, djMessage, queue: getQueueState(), trialLimited: true });
@@ -1278,8 +1385,8 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
   const id  = req.params.id;
   const track = trackForPlaybackId(id);
   try {
-    const url = await resolveAudioUrl(id, track);
-    if (!url) {
+    const resolved = await resolvePlayableAudio(track);
+    if (!resolved?.url) {
       await handlePlaybackFailure({
         stage: 'stream',
         reason: 'url_unavailable',
@@ -1290,7 +1397,9 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
       return res.status(404).json({ error: '该歌曲暂不可播放，可能受版权限制' });
     }
 
-    const isQQ = String(id).startsWith('qq:');
+    const url = resolved.url;
+    const streamTrack = resolved.track || track;
+    const isQQ = streamTrack?.source === 'qq' || String(streamTrack?.id || id).startsWith('qq:');
 
     const streamHeaders = isQQ
       ? {
@@ -1317,7 +1426,7 @@ app.get('/api/music/stream/:id(*)', async (req, res) => {
       validateStatus: (status) => status >= 200 && status < 300,
       headers: streamHeaders
     });
-    const successfulTrack = trackForPlaybackId(id);
+    const successfulTrack = streamTrack;
     playbackDiagnostics.recordSuccess(successfulTrack);
     playbackMemory.recordSuccess(successfulTrack);
 
@@ -1385,7 +1494,18 @@ app.get('/api/music/lyric/:id(*)', async (req, res) => {
 app.get('/api/music/search', async (req, res) => {
   const { q, limit } = req.query;
   if (!q) return res.json({ songs: [] });
-  const songs = dedupeSongs(await music.searchSongs(q, parseInt(limit) || 20));
+  const requestedLimit = parseInt(limit) || 20;
+  let songs = [];
+  if (qqmusic.isEnabled()) {
+    try {
+      songs = dedupeSongs(await qqmusic.searchSongs(q, requestedLimit));
+    } catch (error) {
+      logger.debug(`QQ search endpoint fallback: ${error.message}`);
+    }
+  }
+  if (!songs.length) {
+    songs = dedupeSongs(await music.searchSongs(q, requestedLimit));
+  }
   res.json({ songs });
 });
 
@@ -1435,7 +1555,8 @@ app.get('/api/qq-login/status', (req, res) => {
   res.json({
     ...qqLoginManager.getStatus(),
     qqCookieHealth: qqmusic.getCookieHealth(),
-    qqPlaybackAuth: qqmusic.getPlaybackAuthStatus()
+    qqPlaybackAuth: qqmusic.getPlaybackAuthStatus(),
+    qqSearchHealth: qqmusic.getSearchHealth()
   });
 });
 
@@ -1467,6 +1588,7 @@ app.get('/api/account-status', (req, res) => {
     qqLoginStatus: qqLoginManager.getStatus(),
     qqCookieHealth: qqmusic.getCookieHealth(),
     qqPlaybackAuth: qqmusic.getPlaybackAuthStatus(),
+    qqSearchHealth: qqmusic.getSearchHealth(),
     neteaseLoginStatus: neteaseLoginManager.getStatus()
   }));
 });

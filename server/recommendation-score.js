@@ -28,53 +28,64 @@ function scoreTrack(track = {}, {
 
   if (setHas(topArtists, artist)) {
     weight += 0.8;
-    reasons.push(`recent artist ${artist}`);
+    reasons.push(`最近常听歌手 ${artist}`);
   }
   if (setHas(topCategories, category)) {
     weight += 0.45;
-    reasons.push(`recent category ${category}`);
+    reasons.push(`最近常听类型 ${category}`);
   }
   if (setHas(feedbackSignals.likedTrackKeys, key)) {
     weight += 1.8;
-    reasons.push('liked track');
+    reasons.push('你喜欢过这首');
   }
   if (setHas(feedbackSignals.boostArtists, artist)) {
     weight += 1.2;
-    reasons.push(`boosted artist ${artist}`);
+    reasons.push(`已加强歌手 ${artist}`);
   }
   if (setHas(feedbackSignals.sceneBoostedTrackKeys, key)) {
     weight += 1;
-    reasons.push('fits current scene');
+    reasons.push('适合当前场景');
+  }
+  if (setHas(feedbackSignals.completedTrackKeys, key)) {
+    weight += 0.7;
+    reasons.push('曾完整听过');
+  } else if (setHas(feedbackSignals.halfPlayedTrackKeys, key)) {
+    weight += 0.3;
+    reasons.push('曾听过半程');
   }
   if (setHas(feedbackSignals.skippedTrackKeys, key)) {
     weight -= 1.2;
-    reasons.push('skipped recently');
+    reasons.push('最近跳过');
+  }
+  if (setHas(feedbackSignals.quickSkippedTrackKeys, key)) {
+    weight -= 1;
+    reasons.push('曾很快跳过');
   }
   if (setHas(feedbackSignals.temporaryReducedTrackKeys, key)) {
     weight -= 0.8;
-    reasons.push('temporarily reduced');
+    reasons.push('临时减少播放');
   }
   if (setHas(feedbackSignals.reduceArtists, artist)) {
     weight -= 0.7;
-    reasons.push(`reduced artist ${artist}`);
+    reasons.push(`减少播放歌手 ${artist}`);
   }
   if (setHas(feedbackSignals.sceneReducedTrackKeys, key)) {
     weight -= 1.4;
-    reasons.push('reduced in current scene');
+    reasons.push('当前场景减少播放');
   }
   if ((tasteSignals.recentSongs || []).includes(track.name)) {
     weight -= 0.8;
-    reasons.push('played very recently');
+    reasons.push('刚播放过');
   }
   if (artistRepeatMode === 'less' && setHas(recentArtists, artist)) {
     weight -= 1;
-    reasons.push('artist repeated recently');
+    reasons.push('歌手最近重复');
   }
 
   const safeWeight = Math.max(0.1, Math.round(weight * 100) / 100);
   return {
     weight: safeWeight,
-    reason: reasons.length ? `Because ${reasons.slice(0, 2).join(' and ')}` : 'Because it matches the current radio mix'
+    reason: reasons.length ? reasons.slice(0, 2).join('，') : '符合当前电台氛围'
   };
 }
 

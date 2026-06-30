@@ -28,7 +28,9 @@ const feedbackSignals = {
   boostArtists: new Set(['Favorite Artist']),
   reduceArtists: new Set(['Skipped Artist']),
   sceneReducedTrackKeys: new Set(),
-  sceneBoostedTrackKeys: new Set()
+  sceneBoostedTrackKeys: new Set(),
+  completedTrackKeys: new Set(['night song::favorite artist']),
+  quickSkippedTrackKeys: new Set(['skipped song::skipped artist'])
 };
 
 const favoriteScore = score.scoreTrack(favorite, { tasteSignals, feedbackSignals });
@@ -37,8 +39,24 @@ const neutralScore = score.scoreTrack(neutral, { tasteSignals, feedbackSignals }
 
 assert.ok(favoriteScore.weight > neutralScore.weight);
 assert.ok(skippedScore.weight < neutralScore.weight);
-assert.match(favoriteScore.reason, /Favorite Artist|City Pop|liked/);
-assert.match(skippedScore.reason, /skipped|reduced/);
+assert.match(favoriteScore.reason, /最近常听歌手 Favorite Artist|最近常听类型 City Pop|你喜欢过这首/);
+assert.match(skippedScore.reason, /最近跳过|减少播放/);
+assert.strictEqual(neutralScore.reason, '符合当前电台氛围');
+
+const completedOnly = score.scoreTrack(neutral, {
+  feedbackSignals: {
+    completedTrackKeys: new Set(['neutral song::neutral artist'])
+  }
+});
+const quickOnly = score.scoreTrack(neutral, {
+  feedbackSignals: {
+    quickSkippedTrackKeys: new Set(['neutral song::neutral artist'])
+  }
+});
+assert.ok(completedOnly.weight > neutralScore.weight);
+assert.ok(quickOnly.weight < neutralScore.weight);
+assert.match(completedOnly.reason, /曾完整听过/);
+assert.match(quickOnly.reason, /曾很快跳过/);
 
 const annotated = score.annotateRecommendationReason(favorite, favoriteScore);
 assert.strictEqual(annotated.recommendationReason, favoriteScore.reason);

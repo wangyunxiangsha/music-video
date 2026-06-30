@@ -7,6 +7,13 @@ function trackKey(candidate) {
   return `${candidate?.source || ''}:${candidate?.id || candidate?.name || ''}`;
 }
 
+function normalizeResolvedTrack(candidate, resolved) {
+  if (!resolved) return null;
+  if (typeof resolved === 'string') return candidate;
+  if (resolved.url) return resolved.track || candidate;
+  return null;
+}
+
 async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolveUrl, maxAttempts = 8, isBlocked = () => false } = {}) {
   const queue = [
     ...(Array.isArray(playlist) ? playlist : []).map(track => ({ track, fallback: false })),
@@ -34,9 +41,10 @@ async function pickPlayableTrack({ playlist = [], fallbackPlaylist = [], resolve
       continue;
     }
     try {
-      const url = await resolveUrl(candidate);
-      if (url) {
-        return { track: candidate, remaining: queue.filter(entry => !entry.fallback).map(entry => entry.track), skipped };
+      const resolved = await resolveUrl(candidate);
+      const playableTrack = normalizeResolvedTrack(candidate, resolved);
+      if (playableTrack) {
+        return { track: playableTrack, remaining: queue.filter(entry => !entry.fallback).map(entry => entry.track), skipped };
       }
     } catch {}
     skipped.push({
@@ -79,9 +87,10 @@ async function precheckPlayableQueue({
     }
     probes += 1;
     try {
-      const url = await resolveUrl(candidate);
-      if (url) {
-        checked.push(candidate);
+      const resolved = await resolveUrl(candidate);
+      const playableTrack = normalizeResolvedTrack(candidate, resolved);
+      if (playableTrack) {
+        checked.push(playableTrack);
         continue;
       }
     } catch {}

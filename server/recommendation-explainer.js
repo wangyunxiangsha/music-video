@@ -18,11 +18,15 @@ function explainTrack(track = {}, context = {}) {
   const sourceText = track.recommendationSource === 'external'
     ? `这是外部推荐池里的候选，当前外部推荐比例约 ${ratio}。`
     : '这是从你的本地歌单池里选出来的。';
+  const scoreText = Number.isFinite(Number(track.recommendationScore))
+    ? `推荐分 ${Number(track.recommendationScore).toFixed(2)}。`
+    : '';
 
   return [
     `《${name}》${artist ? ` - ${artist}` : ''}：${baseReason}。`,
     `当前场景是「${sceneName}」，DJ 策略是「${policyName}」。`,
-    sourceText
+    sourceText,
+    scoreText
   ].join('');
 }
 

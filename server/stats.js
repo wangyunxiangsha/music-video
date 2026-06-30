@@ -203,6 +203,35 @@ function buildFeedbackEntry(action, { now = Math.floor(Date.now() / 1000) } = {}
   };
 }
 
+function buildPlaybackProgressEntry(action, { now = Math.floor(Date.now() / 1000) } = {}) {
+  const supported = new Set(['half_played', 'completed', 'quick_skip']);
+  if (!supported.has(action.event)) {
+    throw new Error(`unsupported playback progress event: ${action.event || 'unknown'}`);
+  }
+  return {
+    id: Date.now(),
+    type: action.event,
+    track_id: action.track?.id ? String(action.track.id) : String(action.track_id || ''),
+    track_key: action.track ? normalizeTrackKey(action.track) : normalizeTrackKey(action),
+    song_name: action.track?.name || action.song_name || '',
+    artist: action.track?.artists?.[0]?.name || action.track?.ar?.[0]?.name || action.artist || '',
+    category: action.track?.categoryName || action.category || '',
+    position: Math.max(0, Number(action.position) || 0),
+    duration: Math.max(0, Number(action.duration) || 0),
+    created_at: now,
+    expires_at: action.event === 'quick_skip' ? now + 7 * 24 * 60 * 60 : null
+  };
+}
+
+function savePlaybackProgress(action) {
+  const db = load();
+  const entry = buildPlaybackProgressEntry(action);
+  db.playbackEvents.unshift(entry);
+  if (db.playbackEvents.length > 1000) db.playbackEvents = db.playbackEvents.slice(0, 1000);
+  save(db);
+  return entry;
+}
+
 function saveFeedback(action) {
   const db = load();
   const entry = buildFeedbackEntry(action);
@@ -239,12 +268,28 @@ function buildFeedbackSignals(events = [], { scene = null, now = Math.floor(Date
   };
 }
 
+function buildPlaybackProgressSignals(events = [], { now = Math.floor(Date.now() / 1000) } = {}) {
+  const activeEvents = events.filter(e => !e.expires_at || e.expires_at > now);
+  return {
+    completedTrackKeys: new Set(activeEvents.filter(e => e.type === 'completed' && e.track_key).map(e => e.track_key)),
+    halfPlayedTrackKeys: new Set(activeEvents.filter(e => e.type === 'half_played' && e.track_key).map(e => e.track_key)),
+    quickSkippedTrackKeys: new Set(activeEvents.filter(e => e.type === 'quick_skip' && e.track_key).map(e => e.track_key))
+  };
+}
+
 function getFeedbackSignals(limit = 200, options = {}) {
   const now = Math.floor(Date.now() / 1000);
-  const events = load().feedback
+  const db = load();
+  const events = db.feedback
     .filter(e => !e.expires_at || e.expires_at > now)
     .slice(0, limit);
-  return buildFeedbackSignals(events, { ...options, now });
+  const playbackEvents = (db.playbackEvents || [])
+    .filter(e => !e.expires_at || e.expires_at > now)
+    .slice(0, limit);
+  return {
+    ...buildFeedbackSignals(events, { ...options, now }),
+    ...buildPlaybackProgressSignals(playbackEvents, { now })
+  };
 }
 
 function isTrackBlocked(track) {
@@ -306,6 +351,9 @@ module.exports = {
   buildFeedbackEntry,
   buildFeedbackSignals,
   saveFeedback,
+  buildPlaybackProgressEntry,
+  buildPlaybackProgressSignals,
+  savePlaybackProgress,
   getFeedbackSignals,
   isTrackBlocked,
   saveDailyBriefing,

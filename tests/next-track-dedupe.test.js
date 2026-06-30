@@ -8,7 +8,9 @@ const index = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 
 assert.match(app, /nextRequestTrackId/);
 assert.match(app, /id:\s*trackId/);
 assert.match(app, /skipReason,\s*id:\s*trackId/);
-assert.match(app, /audio\.onended\s*=\s*\(\)\s*=>\s*requestNextTrack\('',\s*'',\s*'ended'\)/);
+assert.match(app, /audio\.onended\s*=\s*\(\)\s*=>\s*{/);
+assert.match(app, /reportPlaybackProgress\('completed'\)/);
+assert.match(app, /requestNextTrack\('',\s*'',\s*'ended'\)/);
 assert.match(app, /requestNextTrack\('',\s*'client_error',\s*'client_error'\)/);
 assert.match(app, /requestNextTrack\('',\s*'stalled',\s*'stalled'\)/);
 assert.match(app, /lastProgressAt = Date\.now\(\);\s*lastProgressTime = 0;\s*fill\.style\.width = '0%'/);

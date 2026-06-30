@@ -12,6 +12,7 @@ function buildAccountStatus({
   qqLoginStatus = {},
   qqCookieHealth = {},
   qqPlaybackAuth = {},
+  qqSearchHealth = {},
   neteaseLoginStatus = {}
 } = {}) {
   const qqCookie = qqLoginStatus.cookie || {};
@@ -42,6 +43,11 @@ function buildAccountStatus({
         qqCookieHealth.suspectedExpired
           ? (qqCookieHealth.message || 'QQ 音乐 Cookie 疑似过期')
           : (qqLoggedIn ? '未发现明显过期信号' : '等待配置 Cookie')
+      ),
+      search: item(
+        qqSearchHealth.state || 'unknown',
+        '搜索状态',
+        qqSearchHealth.message || '尚未检测 QQ 搜索'
       )
     },
     netease: {

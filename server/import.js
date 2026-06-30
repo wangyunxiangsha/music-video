@@ -50,6 +50,16 @@ function trackKey(track = {}) {
   return id ? `netease:${id}` : '';
 }
 
+function songIdentityKey(track = {}) {
+  const name = String(track.name || '').trim().toLowerCase().replace(/\s+/g, '');
+  const artists = (track.artists || track.ar || [])
+    .map(item => String(item.name || item || '').trim().toLowerCase().replace(/\s+/g, ''))
+    .filter(Boolean)
+    .sort()
+    .join('/');
+  return name && artists ? `${name}::${artists}` : '';
+}
+
 function removedTrackKeys(data = {}) {
   return new Set((data.claudio?.removedTracks || []).map(item => item.key).filter(Boolean));
 }
@@ -331,7 +341,7 @@ function buildPlaylistPool(options = {}) {
   if (!local) return [];
   const blocked = removedTrackKeys(local);
 
-  const neteaseSongs = (local.netease?.playlists || []).flatMap(p =>
+  let neteaseSongs = (local.netease?.playlists || []).flatMap(p =>
     p.songs.map(s => ({ id: s.id, name: s.name, artists: s.artists.map(n => ({ name: n })), album: { name: s.album }, privilege: { pl: 1 } }))
   );
   const qqSongs = (local.qq?.playlists || []).flatMap(p =>
@@ -346,6 +356,8 @@ function buildPlaylistPool(options = {}) {
       privilege: { pl: 1 }
     }))
   );
+  const qqSongIdentities = new Set(qqSongs.map(songIdentityKey).filter(Boolean));
+  neteaseSongs = neteaseSongs.filter(song => !qqSongIdentities.has(songIdentityKey(song)));
   const claudioSongs = (local.claudio?.playlists || []).flatMap(p =>
     (p.songs || []).map(s => {
       const source = s.source || (s.mid ? 'qq' : 'netease');
@@ -367,9 +379,10 @@ function buildPlaylistPool(options = {}) {
     })
   );
 
-  // Deduplicate
+  // Deduplicate. Prefer QQ copies for the same song because the Netease copy
+  // often degrades to a preview clip even when the user's QQ account can play it.
   const seen = new Set();
-  const unique = [...neteaseSongs, ...qqSongs, ...claudioSongs].filter(s => {
+  const unique = [...qqSongs, ...neteaseSongs, ...claudioSongs].filter(s => {
     const key = trackKey(s);
     if (!s.id || !key || blocked.has(key) || seen.has(key)) return false;
     seen.add(key);
@@ -382,6 +395,48 @@ function buildPlaylistPool(options = {}) {
     [unique[i], unique[j]] = [unique[j], unique[i]];
   }
   return unique;
+}
+
+function normalizeSearchText(value = '') {
+  return String(value).trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function artistNamesOf(song = {}) {
+  return (song.artists || []).map(name => String(name || '')).filter(Boolean);
+}
+
+function localQqSongToTrack(song = {}) {
+  if (!song.mid) return null;
+  return {
+    id: `qq:${song.mid}`,
+    source: 'qq',
+    _qqmid: song.mid,
+    _qqMediaMid: song.mediaMid || '',
+    name: song.name || '',
+    artists: artistNamesOf(song).map(name => ({ name })),
+    album: { name: song.album || '' },
+    privilege: { pl: 1 },
+    recommendationSource: 'local',
+    recommendationReason: '来自本地 QQ 歌单兜底'
+  };
+}
+
+function findLocalQqTrack(title, artistHint = '', options = {}) {
+  const local = ensureLocalShape(loadLocal(options) || {});
+  const wantedTitle = normalizeSearchText(title);
+  const wantedArtist = normalizeSearchText(artistHint);
+  if (!wantedTitle) return null;
+
+  const songs = (local.qq?.playlists || []).flatMap(p => p.songs || []);
+  const candidates = songs.filter(song => normalizeSearchText(song.name) === wantedTitle);
+  const artistMatched = wantedArtist
+    ? candidates.filter(song => artistNamesOf(song).some(name => {
+      const normalized = normalizeSearchText(name);
+      return normalized.includes(wantedArtist) || wantedArtist.includes(normalized);
+    }))
+    : candidates;
+  const picked = artistMatched[0] || (!wantedArtist ? candidates[0] : null);
+  return picked ? localQqSongToTrack(picked) : null;
 }
 
 function addTrackToLocalPool(track, options = {}) {
@@ -479,6 +534,7 @@ module.exports = {
   mergeImportedPlaylists,
   buildTasteData,
   buildPlaylistPool,
+  findLocalQqTrack,
   loadLocal,
   listRemovedTracks,
   addTrackToLocalPool,

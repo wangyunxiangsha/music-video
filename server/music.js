@@ -12,6 +12,31 @@ function getNeteaseCookie(env = process.env) {
 
 let neteaseProcess = null;
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForNcmReady({
+  maxAttempts = Number(process.env.NCM_READY_ATTEMPTS || 20),
+  intervalMs = Number(process.env.NCM_READY_INTERVAL_MS || 300),
+  probe = async () => {
+    const res = await axios.get(`${NCM_BASE}/login/status`, {
+      timeout: 1000,
+      headers: { 'User-Agent': 'Mozilla/5.0' }
+    });
+    return Boolean(res.data);
+  },
+  sleep: wait = sleep
+} = {}) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      if (await probe()) return true;
+    } catch {}
+    if (attempt < maxAttempts - 1) await wait(intervalMs);
+  }
+  return false;
+}
+
 async function startServer() {
   if (neteaseProcess) return;
 
@@ -38,7 +63,12 @@ async function startServer() {
   });
 
   process.on('exit', () => { if (neteaseProcess) neteaseProcess.kill(); });
-  logger.info(`✓ NeteaseCloudMusicApi on port ${NCM_PORT}`);
+  const ready = await waitForNcmReady();
+  if (!ready) {
+    logger.warn(`NeteaseCloudMusicApi 已启动但接口暂未就绪 (port ${NCM_PORT})`);
+  } else {
+    logger.info(`✓ NeteaseCloudMusicApi on port ${NCM_PORT}`);
+  }
 }
 
 async function ncmGet(endpoint, params = {}) {
@@ -116,5 +146,6 @@ module.exports = {
   getUserPlaylists,
   getPlaylistTracks,
   getNeteaseCookie,
-  ncmGet
+  ncmGet,
+  waitForNcmReady
 };

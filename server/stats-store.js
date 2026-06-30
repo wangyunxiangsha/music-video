@@ -7,6 +7,7 @@ const EMPTY_STATS = {
   plays: [],
   prefs: {},
   feedback: [],
+  playbackEvents: [],
   dailyBriefings: []
 };
 
@@ -15,6 +16,7 @@ function normalizeStats(input = {}) {
     plays: Array.isArray(input.plays) ? input.plays : [],
     prefs: input.prefs && typeof input.prefs === 'object' && !Array.isArray(input.prefs) ? input.prefs : {},
     feedback: Array.isArray(input.feedback) ? input.feedback : [],
+    playbackEvents: Array.isArray(input.playbackEvents) ? input.playbackEvents : [],
     dailyBriefings: Array.isArray(input.dailyBriefings) ? input.dailyBriefings : []
   };
 }
@@ -41,10 +43,11 @@ function storageReport(filePath, stats = loadStats(filePath)) {
   const counts = {
     plays: normalized.plays.length,
     feedback: normalized.feedback.length,
+    playbackEvents: normalized.playbackEvents.length,
     dailyBriefings: normalized.dailyBriefings.length,
     prefs: Object.keys(normalized.prefs).length
   };
-  const shouldSplit = bytes > 1024 * 1024 || counts.plays > 1000 || counts.feedback > 500 || counts.dailyBriefings > 100;
+  const shouldSplit = bytes > 1024 * 1024 || counts.plays > 1000 || counts.feedback > 500 || counts.playbackEvents > 1000 || counts.dailyBriefings > 100;
   return {
     path: filePath,
     exists,

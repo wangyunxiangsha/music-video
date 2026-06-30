@@ -19,7 +19,8 @@ const externalTrack = {
   album: { name: '外部专辑' },
   recommendationSource: 'external',
   sourceReason: '国风',
-  recommendationReason: '因为你最近常听国风'
+  recommendationReason: '因为你最近常听国风',
+  recommendationScore: 2.45
 };
 
 const context = {
@@ -33,6 +34,8 @@ assert.match(explainer.explainTrack(localTrack, context), /下雨安静/);
 assert.match(explainer.explainTrack(localTrack, context), /少说一点/);
 assert.match(explainer.explainTrack(externalTrack, context), /国风/);
 assert.match(explainer.explainTrack(externalTrack, context), /25%/);
+assert.match(explainer.explainTrack(externalTrack, context), /推荐分/);
+assert.match(explainer.explainTrack(externalTrack, context), /2\.45/);
 
 const summary = queue.summarizeQueue({
   currentTrack: localTrack,
@@ -43,6 +46,7 @@ const summary = queue.summarizeQueue({
 });
 assert.strictEqual(summary.current.recommendationReason, '来自你的歌单');
 assert.strictEqual(summary.next[0].sourceReason, '国风');
+assert.strictEqual(summary.next[0].recommendationScore, 2.45);
 assert.strictEqual(summary.recommendation.externalRatio, 0.25);
 
 const notVibe = feedback.parseFeedback('这首不对味', localTrack);

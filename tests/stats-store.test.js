@@ -11,6 +11,7 @@ assert.deepStrictEqual(store.normalizeStats({}), {
   plays: [],
   prefs: {},
   feedback: [],
+  playbackEvents: [],
   dailyBriefings: []
 });
 
@@ -18,10 +19,12 @@ const normalized = store.normalizeStats({
   plays: [{ song_name: '夜笙歌' }],
   prefs: { stationMood: 'quiet' },
   feedback: 'bad',
+  playbackEvents: [{ type: 'completed' }],
   dailyBriefings: [{ key: '2026-05-25:night' }]
 });
 assert.strictEqual(normalized.plays.length, 1);
 assert.deepStrictEqual(normalized.feedback, []);
+assert.strictEqual(normalized.playbackEvents.length, 1);
 assert.strictEqual(normalized.prefs.stationMood, 'quiet');
 
 store.saveStats(file, normalized);
@@ -40,6 +43,7 @@ const large = store.storageReport(file, {
   plays: new Array(1500).fill({}),
   prefs: {},
   feedback: new Array(700).fill({}),
+  playbackEvents: new Array(1200).fill({}),
   dailyBriefings: []
 });
 assert.strictEqual(large.recommendation, 'consider_split');

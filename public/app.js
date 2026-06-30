@@ -131,6 +131,13 @@
     return '';
   }
 
+  function recommendationHint(track = {}) {
+    const label = recommendationLabel(track);
+    const score = Number(track.recommendationScore);
+    const scoreText = Number.isFinite(score) ? `推荐分 ${score.toFixed(2)}` : '';
+    return [label, scoreText].filter(Boolean).join(' · ');
+  }
+
   function updateClock() {
     const now = new Date();
     const hh = now.getHours().toString().padStart(2, '0');
@@ -306,12 +313,13 @@
     }
     queueList.innerHTML = next.map((item, index) => {
       const reason = recommendationLabel(item);
+      const hint = recommendationHint(item);
       return `
       <div class="queue-item">
         <span>${String(index + 1).padStart(2, '0')}</span>
         <div class="queue-main">
           <strong title="${escapeHtml(item.name)}">${escapeHtml(item.name || '未知歌曲')}</strong>
-          ${reason ? `<small class="queue-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>` : ''}
+          ${reason ? `<small class="queue-reason" title="${escapeHtml(hint || reason)}">${escapeHtml(reason)}</small>` : ''}
         </div>
         <em title="${escapeHtml(item.artist)}">${escapeHtml(item.artist || '未知歌手')}</em>
       </div>
@@ -777,6 +785,7 @@
       { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.login || {}) },
       { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.playback || {}) },
       { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.cookie || {}) },
+      { platform: data.qq?.label || 'QQ 音乐', ...(data.qq?.search || {}) },
       { platform: data.netease?.label || '网易云', ...(data.netease?.login || {}) },
       { platform: data.netease?.label || '网易云', ...(data.netease?.playback || {}) }
     ];
@@ -786,12 +795,14 @@
     const qqLogin = data.qq?.login?.state || 'missing';
     const qqPlayback = data.qq?.playback?.state || 'missing';
     const qqCookie = data.qq?.cookie?.state || 'missing';
+    const qqSearch = data.qq?.search?.state || 'unknown';
     const neteaseLogin = data.netease?.login?.state || 'missing';
     const neteasePlayback = data.netease?.playback?.state || 'missing';
 
     if (qqLogin !== 'ok') return '建议：先扫码刷新 QQ 音乐登录，再重新检测播放授权。';
     if (qqPlayback !== 'ok') return '建议：QQ 已登录但缺少播放授权，优先扫码刷新 QQ；仍失败时按账号权益或版权限制处理。';
     if (qqCookie !== 'ok') return '建议：QQ Cookie 有过期信号，扫码刷新后会清空旧失败缓存。';
+    if (qqSearch === 'warn') return '建议：QQ 搜索接口最近失败，点歌会先查本地 QQ 歌单；如果本地没有这首歌，才会回落网易云。';
     if (neteaseLogin !== 'ok') return '建议：网易云未登录，遇到试听片段时先扫码登录网易云。';
     if (neteasePlayback !== 'ok') return '建议：网易云可播状态异常，优先检查账号权益和地区版权。';
     return '状态良好：双平台登录和播放授权看起来正常。';
@@ -836,12 +847,13 @@
     }
     const artist = artistOf(nextTrack);
     const reason = recommendationLabel(nextTrack);
+    const hint = recommendationHint(nextTrack);
     queueList.innerHTML = `
       <div class="queue-item">
         <span>01</span>
         <div class="queue-main">
           <strong title="${escapeHtml(nextTrack.name)}">${escapeHtml(nextTrack.name || '未知歌曲')}</strong>
-          ${reason ? `<small class="queue-reason" title="${escapeHtml(reason)}">${escapeHtml(reason)}</small>` : ''}
+          ${reason ? `<small class="queue-reason" title="${escapeHtml(hint || reason)}">${escapeHtml(reason)}</small>` : ''}
         </div>
         <em title="${escapeHtml(artist)}">${escapeHtml(artist || '未知歌手')}</em>
       </div>
@@ -924,6 +936,13 @@
   }
 
   function onMessage(d) {
+    if (d.type === 'djMessage') {
+      if (!d.trackId || String(d.trackId) === String(S.track?.id || '')) {
+        typewriter(d.djMessage || '');
+      }
+      return;
+    }
+
     if (d.type === 'state' || d.type === 'track') {
       if (d.track) loadTrack(d.track, d.userRequested);
       if ('djMessage' in d) typewriter(d.djMessage || '');
@@ -997,6 +1016,33 @@
     } catch {}
   }
 
+  let playbackProgressReported = new Set();
+  function playbackProgressPayload(event) {
+    return {
+      id: S.track?.id,
+      event,
+      position: Math.max(0, Number(audio.currentTime) || 0),
+      duration: Math.max(0, Number(audio.duration) || 0)
+    };
+  }
+
+  function reportPlaybackProgress(event) {
+    if (!S.track?.id || playbackProgressReported.has(event)) return;
+    playbackProgressReported.add(event);
+    fetch('/api/playback/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(playbackProgressPayload(event))
+    }).catch(() => {});
+  }
+
+  function isQuickManualSkip() {
+    const position = Number(audio.currentTime) || 0;
+    const duration = Number(audio.duration) || 0;
+    if (position >= 30) return false;
+    return !duration || position / duration < 0.2;
+  }
+
   let nextRequestTrackId = null;
   function requestNextTrack(reason = '', skipReason = '', nextReason = '') {
     const trackId = S.track?.id || '';
@@ -1050,6 +1096,7 @@
     songArtist.textContent = artist;
     songAlbum.textContent  = album;
     if (songReason) songReason.textContent = recommendationLabel(track);
+    playbackProgressReported = new Set();
     lastProgressAt = Date.now();
     lastProgressTime = 0;
     fill.style.width = '0%';
@@ -1106,7 +1153,10 @@
     if (audio.paused) { audio.play(); } else { audio.pause(); }
   };
 
-  btnNext.onclick = () => requestNextTrack('', 'manual_skip');
+  btnNext.onclick = () => {
+    if (isQuickManualSkip()) reportPlaybackProgress('quick_skip');
+    requestNextTrack('', 'manual_skip');
+  };
 
   btnPrev.onclick = () => {
     if (audio.currentTime > 4) audio.currentTime = 0;
@@ -1164,7 +1214,10 @@
     };
   }
 
-  audio.onended  = () => requestNextTrack('', '', 'ended');
+  audio.onended  = () => {
+    reportPlaybackProgress('completed');
+    requestNextTrack('', '', 'ended');
+  };
   audio.onplay   = () => {
     lastProgressAt = Date.now();
     lastProgressTime = audio.currentTime || 0;
@@ -1191,6 +1244,7 @@
         return;
       }
       console.warn(`Netease 试听片段（${Math.round(dur)}s），自动跳过`);
+      reportPlaybackFailure('trial_clip', `short audio duration ${Math.round(dur)}s`);
       requestNextTrack(`《${S.track?.name || '该歌曲'}》只有试听版，马上换下一首。`, '', 'trial_clip');
     } else {
       resetTrialClipSkips();
@@ -1227,6 +1281,9 @@
     fill.style.width = `${pct}%`;
     tCur.textContent = fmtTime(audio.currentTime);
     tEnd.textContent = fmtTime(audio.duration);
+    if ((audio.currentTime >= 30 || audio.duration <= 60) && audio.currentTime / audio.duration >= 0.5) {
+      reportPlaybackProgress('half_played');
+    }
     if (S.lyricOpen) syncLyric();
   };
 

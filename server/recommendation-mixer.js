@@ -336,13 +336,16 @@ async function buildExternalRecommendationPool({ music, qqmusic, tasteSignals = 
   const candidates = [];
   for (const seed of seeds) {
     if (candidates.length >= limit) break;
-    try {
-      const found = await music.searchSongs(seed.query, 6);
-      candidates.push(...(found || []).map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean).filter(isCleanExternalCandidate));
-    } catch {}
-    if (candidates.length < limit && qqmusic?.isEnabled?.()) {
+    let qqFound = [];
+    if (qqmusic?.isEnabled?.()) {
       try {
-        const found = await qqmusic.searchSongs(seed.query, 4);
+        qqFound = (await qqmusic.searchSongs(seed.query, 6)) || [];
+        candidates.push(...qqFound.map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean).filter(isCleanExternalCandidate));
+      } catch {}
+    }
+    if (!qqFound.length && candidates.length < limit) {
+      try {
+        const found = await music.searchSongs(seed.query, 4);
         candidates.push(...(found || []).map(track => normalizeSearchTrack(track, seed.reason)).filter(Boolean).filter(isCleanExternalCandidate));
       } catch {}
     }
