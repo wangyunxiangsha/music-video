@@ -540,5 +540,6 @@ module.exports = {
   addTrackToLocalPool,
   removeTrackFromLocalPool,
   restoreRemovedTrack,
-  trackKey
+  trackKey,
+  songIdentityKey
 };

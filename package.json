@@ -8,6 +8,7 @@
     "dev": "nodemon server/index.js",
     "sync": "node server/sync-playlists.js",
     "classify": "node server/classify-playlists.js",
+    "test": "node --test tests/*.test.js",
     "test:visual": "node scripts/visual-regression.js"
   },
   "dependencies": {

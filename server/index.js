@@ -50,6 +50,7 @@ const PLAYBACK_QUEUE_PRECHECK_ATTEMPTS = Math.max(
   PLAYBACK_QUEUE_PRECHECK_COUNT,
   Number(process.env.PLAYBACK_QUEUE_PRECHECK_ATTEMPTS || 12)
 );
+const QQ_EQUIVALENT_CACHE_MS = Math.max(0, Number(process.env.QQ_EQUIVALENT_CACHE_MS || 10 * 60 * 1000));
 const startedAt = new Date().toISOString();
 const RUNTIME_FILE = path.join(__dirname, '../data/runtime.json');
 const DEFAULT_EXTERNAL_RECOMMEND_RATIO = recommendationMixer.resolveExternalRecommendationRatio({
@@ -92,6 +93,7 @@ let activePort = null;
 let nextRequestInFlight = null;
 let trialClipNextRequests = [];
 let announcementGeneration = 0;
+const qqEquivalentCache = new Map();
 const clients = new Set();
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -532,12 +534,49 @@ function artistHintsOf(track = {}) {
     .filter(Boolean);
 }
 
+function qqEquivalentCacheKey(track = {}) {
+  if (typeof importer.songIdentityKey === 'function') {
+    const key = importer.songIdentityKey(track);
+    if (key) return key;
+  }
+  const title = String(track.name || '').trim().toLowerCase().replace(/\s+/g, '');
+  const artists = artistHintsOf(track)
+    .map(name => name.toLowerCase().replace(/\s+/g, ''))
+    .sort()
+    .join('/');
+  return title && artists ? `${title}::${artists}` : '';
+}
+
+function getCachedQqEquivalent(key) {
+  if (!key || !QQ_EQUIVALENT_CACHE_MS) return { hit: false, value: null };
+  const cached = qqEquivalentCache.get(key);
+  if (!cached) return { hit: false, value: null };
+  if (Date.now() > cached.expiresAt) {
+    qqEquivalentCache.delete(key);
+    return { hit: false, value: null };
+  }
+  return { hit: true, value: cached.value };
+}
+
+function setCachedQqEquivalent(key, value) {
+  if (!key || !QQ_EQUIVALENT_CACHE_MS) return value;
+  qqEquivalentCache.set(key, {
+    value,
+    expiresAt: Date.now() + QQ_EQUIVALENT_CACHE_MS
+  });
+  return value;
+}
+
 async function resolveQqEquivalentTrack(track) {
   if (!track || track.source === 'qq' || !qqmusic.isEnabled()) return null;
   const title = track.name || '';
   const artistHints = artistHintsOf(track);
   const artist = artistHints.join(' ');
   if (!title || !artistHints.length) return null;
+
+  const cacheKey = qqEquivalentCacheKey(track);
+  const cached = getCachedQqEquivalent(cacheKey);
+  if (cached.hit) return cached.value;
 
   try {
     const query = `${title} ${artist}`;
@@ -551,7 +590,7 @@ async function resolveQqEquivalentTrack(track) {
     for (const candidate of qqRanked.slice(0, 3)) {
       const url = await qqmusic.getSongUrl(candidate._qqmid, candidate._qqMediaMid);
       if (url) {
-        return {
+        return setCachedQqEquivalent(cacheKey, {
           url,
           track: {
             ...candidate,
@@ -565,12 +604,13 @@ async function resolveQqEquivalentTrack(track) {
               name: track.name
             }]
           }
-        };
+        });
       }
     }
   } catch (error) {
     logger.debug(`QQ 等价曲目替换失败: ${error.message}`);
   }
+  setCachedQqEquivalent(cacheKey, null);
   return null;
 }
 
@@ -661,9 +701,13 @@ async function findRequestedSong(songName) {
 }
 
 async function activateTrack(track, systemPrompt, userRequested = false) {
-  currentTrack = track;
-  stats.savePlay(track);
-  prepareTrackAnnouncement(track, systemPrompt);
+  const playable = await resolvePlayableAudio(track).catch((error) => {
+    logger.debug(`播放元数据预解析失败，保留原曲目: ${error.message}`);
+    return null;
+  });
+  currentTrack = playable?.track || track;
+  stats.savePlay(currentTrack);
+  prepareTrackAnnouncement(currentTrack, systemPrompt);
   broadcast({
     type: 'track',
     track: currentTrack,
@@ -676,7 +720,7 @@ async function activateTrack(track, systemPrompt, userRequested = false) {
     djPolicy: activePolicy,
     scene: activeScene
   });
-  return track;
+  return currentTrack;
 }
 
 async function buildRuntimeContext() {
@@ -1205,14 +1249,18 @@ app.post('/api/local-pool/current', (req, res) => {
 app.post('/api/local-pool/remove-current', async (req, res) => {
   try {
     if (!currentTrack) return res.status(400).json({ ok: false, reason: '当前没有正在播放的歌曲' });
-    if (currentTrack.recommendationSource === 'external') {
-      return res.status(400).json({ ok: false, reason: '这首是外部推荐，不在本地歌单池' });
-    }
     if (currentTrack.recommendationSource === 'removed') {
       return res.status(400).json({ ok: false, reason: '这首已经从本地歌单池删除' });
     }
     const result = importer.removeTrackFromLocalPool(currentTrack);
     if (!result.ok) return res.status(400).json(result);
+    stats.saveFeedback({
+      type: 'dislike',
+      target: 'track',
+      value: 'remove',
+      track: currentTrack,
+      scene: activeScene
+    });
     playlist = playlist.filter(track => importer.trackKey(track) !== result.key);
     currentTrack = {
       ...currentTrack,

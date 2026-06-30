@@ -22,13 +22,34 @@ assert.match(js, /const btnRemoveLocal\s*=\s*\$\('btn-remove-local'\)/);
 assert.match(js, /function updateSaveLocalButton/);
 assert.match(js, /function updateRemoveLocalButton/);
 assert.match(js, /recommendationSource === 'external'/);
+const removeButtonUpdater = js.match(/function updateRemoveLocalButton\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+assert.doesNotMatch(
+  removeButtonUpdater,
+  /source !== 'external'/,
+  'REMOVE should stay available for external tracks so they can be blocked'
+);
 assert.match(js, /fetch\('\/api\/local-pool\/current'/);
 assert.match(js, /fetch\('\/api\/local-pool\/remove-current'/);
 const removeHandler = js.match(/btnRemoveLocal\.onclick = async \(\) => \{[\s\S]*?\n    \};/)?.[0] || '';
 assert.doesNotMatch(removeHandler, /loadTrack\(/);
+assert.doesNotMatch(
+  removeHandler,
+  /source === 'external'/,
+  'REMOVE click handler should not ignore external tracks'
+);
 assert.match(server, /app\.post\('\/api\/local-pool\/current'/);
 assert.match(server, /app\.post\('\/api\/local-pool\/remove-current'/);
 const removeRoute = server.match(/app\.post\('\/api\/local-pool\/remove-current'[\s\S]*?\n\}\);/)?.[0] || '';
 assert.doesNotMatch(removeRoute, /nextTrack\(/);
+assert.doesNotMatch(
+  removeRoute,
+  /recommendationSource === 'external'/,
+  'remove-current should not reject external tracks'
+);
+assert.match(
+  removeRoute,
+  /stats\.saveFeedback\(\{[\s\S]*type:\s*'dislike'/,
+  'remove-current should save a dislike signal so removed external tracks stop coming back'
+);
 
 console.log('save external button tests passed');

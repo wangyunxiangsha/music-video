@@ -385,10 +385,10 @@
   function updateRemoveLocalButton() {
     if (!btnRemoveLocal) return;
     const source = S.track?.recommendationSource;
-    const removable = Boolean(S.track) && source !== 'external' && source !== 'removed';
+    const removable = Boolean(S.track) && source !== 'removed';
     btnRemoveLocal.disabled = !removable;
     btnRemoveLocal.textContent = 'REMOVE';
-    btnRemoveLocal.title = removable ? '从本地歌单池删除并永久屏蔽' : '外部推荐不在本地歌单池';
+    btnRemoveLocal.title = removable ? '屏蔽当前歌曲，并从本地歌单池删除（如存在）' : '这首已经从本地歌单池删除';
   }
 
   async function loadSettings() {
@@ -1130,6 +1130,12 @@
   let lastProgressTime = 0;
   let trialClipSkips = [];
 
+  function isTrialClipTrack(duration) {
+    const dur = Number(duration) || 0;
+    const isQQ = S.track?.id?.startsWith?.('qq:');
+    return !isQQ && dur > 0 && dur <= 35;
+  }
+
   function canAutoSkipTrialClip(now = Date.now()) {
     trialClipSkips = trialClipSkips.filter((ts) => now - ts < TRIAL_CLIP_SKIP_WINDOW_MS);
     if (trialClipSkips.length >= TRIAL_CLIP_SKIP_LIMIT) return false;
@@ -1189,7 +1195,7 @@
   if (btnRemoveLocal) {
     btnRemoveLocal.onclick = async () => {
       const source = S.track?.recommendationSource;
-      if (!S.track || source === 'external' || source === 'removed') return;
+      if (!S.track || source === 'removed') return;
       const name = S.track.name || '这首歌';
       btnRemoveLocal.disabled = true;
       btnRemoveLocal.textContent = 'BUSY';
@@ -1234,8 +1240,7 @@
   // Skip Netease 30-second trial clips; QQ songs with VIP always play to end
   audio.onloadedmetadata = () => {
     const dur = audio.duration;
-    const isQQ = S.track?.id?.startsWith?.('qq:');
-    if (!isQQ && dur > 0 && dur <= 35) {
+    if (isTrialClipTrack(dur)) {
       if (!canAutoSkipTrialClip()) {
         console.warn('连续遇到网易云试听片段，暂停自动跳过');
         showPlaybackNotice('连续遇到试听片段，已暂停自动换歌，点下一首继续。');
@@ -1281,7 +1286,7 @@
     fill.style.width = `${pct}%`;
     tCur.textContent = fmtTime(audio.currentTime);
     tEnd.textContent = fmtTime(audio.duration);
-    if ((audio.currentTime >= 30 || audio.duration <= 60) && audio.currentTime / audio.duration >= 0.5) {
+    if (!isTrialClipTrack(audio.duration) && (audio.currentTime >= 30 || audio.duration <= 60) && audio.currentTime / audio.duration >= 0.5) {
       reportPlaybackProgress('half_played');
     }
     if (S.lyricOpen) syncLyric();
