@@ -732,6 +732,24 @@ async function getSongUrl(songmid, mediaMid = '') {
 }
 
 // ─── Lyric ─────────────────────────────────────────────────────────────────────
+function looksLikeTimedLyric(text = '') {
+  return /\[\d{1,2}:\d{1,2}(?:[.:]\d+)?\]/.test(String(text));
+}
+
+function decodeLyric(raw = '') {
+  const text = String(raw || '');
+  if (!text) return '';
+  if (looksLikeTimedLyric(text)) return text;
+  const compact = text.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/=]+$/.test(compact) || compact.length % 4 === 1) return text;
+  try {
+    const decoded = Buffer.from(compact, 'base64').toString('utf8');
+    return looksLikeTimedLyric(decoded) ? decoded : text;
+  } catch {
+    return text;
+  }
+}
+
 async function getLyric(songmid) {
   const cookie = getQQCookie();
   try {
@@ -741,8 +759,7 @@ async function getLyric(songmid) {
       timeout: 8000
     });
     const raw = res.data?.lyric || '';
-    // QQ lyric may be base64 encoded
-    try { return Buffer.from(raw, 'base64').toString('utf8'); } catch { return raw; }
+    return decodeLyric(raw);
   } catch {
     return '';
   }

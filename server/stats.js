@@ -292,8 +292,8 @@ function getFeedbackSignals(limit = 200, options = {}) {
   };
 }
 
-function isTrackBlocked(track) {
-  const signals = getFeedbackSignals();
+function isTrackBlocked(track, { limit = 500 } = {}) {
+  const signals = getFeedbackSignals(limit);
   const artist = track?.artists?.[0]?.name || track?.ar?.[0]?.name || '';
   const category = track?.categoryName || '';
   const trackKey = normalizeTrackKey(track);

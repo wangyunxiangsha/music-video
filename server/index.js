@@ -813,6 +813,10 @@ function isPlayable(song) {
   return pl > 0;
 }
 
+function isTrackPlaybackBlocked(track) {
+  return playbackMemory.isBlocked(track) || stats.isTrackBlocked(track, { limit: 500 });
+}
+
 function boostPlaylistByTaste(pool, { scene = activeScene } = {}) {
   const signals = stats.getTasteSignals(120);
   const feedbackSignals = stats.getFeedbackSignals(200, { scene });
@@ -987,8 +991,8 @@ async function nextTrack({ maxAttempts = 8 } = {}) {
     playlist,
     resolveUrl: resolveSongUrl,
     maxAttempts,
-    isBlocked: playbackMemory.isBlocked,
-    fallbackPlaylist: playbackMemory.recentPlayable(12)
+    isBlocked: isTrackPlaybackBlocked,
+    fallbackPlaylist: playbackMemory.recentPlayable(12).filter(track => !isTrackPlaybackBlocked(track))
   });
   const selection = nextTrackSelection.applyPlayablePick(picked);
   playlist = selection.playlist;
@@ -1225,9 +1229,26 @@ app.post('/api/generate-taste', async (req, res) => {
   }
 });
 
+function assertCurrentTrackRequest(req, res) {
+  if (!currentTrack) {
+    res.status(400).json({ ok: false, reason: '当前没有正在播放的歌曲' });
+    return false;
+  }
+  const requestedId = req.body?.id;
+  if (!requestedId) {
+    res.status(400).json({ ok: false, reason: '缺少当前歌曲 ID，请刷新后再试' });
+    return false;
+  }
+  if (String(requestedId) !== String(currentTrack.id || '')) {
+    res.status(409).json({ ok: false, reason: '歌曲已经切换，本次操作已取消', stale: true, track: currentTrack });
+    return false;
+  }
+  return true;
+}
+
 app.post('/api/local-pool/current', (req, res) => {
   try {
-    if (!currentTrack) return res.status(400).json({ ok: false, reason: '当前没有正在播放的歌曲' });
+    if (!assertCurrentTrackRequest(req, res)) return;
     if (currentTrack.recommendationSource !== 'external') {
       return res.status(400).json({ ok: false, reason: '这首已经来自本地歌单池' });
     }
@@ -1248,10 +1269,11 @@ app.post('/api/local-pool/current', (req, res) => {
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.post('/api/local-pool/remove-current', async (req, res) => {
   try {
-    if (!currentTrack) return res.status(400).json({ ok: false, reason: '当前没有正在播放的歌曲' });
+    if (!assertCurrentTrackRequest(req, res)) return;
     if (currentTrack.recommendationSource === 'removed') {
       return res.status(400).json({ ok: false, reason: '这首已经从本地歌单池删除' });
     }
+    const removedTrack = currentTrack;
     const result = importer.removeTrackFromLocalPool(currentTrack);
     if (!result.ok) return res.status(400).json(result);
     stats.saveFeedback({
@@ -1263,12 +1285,19 @@ app.post('/api/local-pool/remove-current', async (req, res) => {
     });
     playlist = playlist.filter(track => importer.trackKey(track) !== result.key);
     currentTrack = {
-      ...currentTrack,
+      ...removedTrack,
       recommendationSource: 'removed',
       recommendationReason: '已从本地歌单池删除'
     };
-    broadcastQueue();
-    res.json({ ...result, track: currentTrack, queue: getQueueState() });
+    currentTrack = null;
+    const selection = await nextTrack({ maxAttempts: 8 });
+    if (!selection?.track) broadcastQueue();
+    res.json({
+      ...result,
+      track: currentTrack,
+      queue: getQueueState(),
+      skippedCandidates: selection?.skippedCount || 0
+    });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
   }

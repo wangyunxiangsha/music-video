@@ -1017,6 +1017,7 @@
   }
 
   let playbackProgressReported = new Set();
+  let trackLoadGeneration = 0;
   function playbackProgressPayload(event) {
     return {
       id: S.track?.id,
@@ -1096,6 +1097,12 @@
     songArtist.textContent = artist;
     songAlbum.textContent  = album;
     if (songReason) songReason.textContent = recommendationLabel(track);
+    document.title = `${track.name} — CLAUDIO.FM`;
+
+    if (!isDifferentTrack) {
+      return;
+    }
+
     playbackProgressReported = new Set();
     lastProgressAt = Date.now();
     lastProgressTime = 0;
@@ -1114,9 +1121,14 @@
     audio.src = `/api/music/stream/${track.id}`;
     audio.load();
 
-    audio.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
-
-    document.title = `${track.name} — CLAUDIO.FM`;
+    const generation = ++trackLoadGeneration;
+    audio.play()
+      .then(() => {
+        if (generation === trackLoadGeneration) setPlaying(true);
+      })
+      .catch(() => {
+        if (generation === trackLoadGeneration) setPlaying(false);
+      });
 
     // Reset lyric if open
     if (S.lyricOpen) loadLyric(track.id);
@@ -1174,10 +1186,15 @@
   if (btnSaveLocal) {
     btnSaveLocal.onclick = async () => {
       if (!S.track || S.track.recommendationSource !== 'external') return;
+      const trackId = S.track.id;
       btnSaveLocal.disabled = true;
       btnSaveLocal.textContent = 'BUSY';
       try {
-        const res = await fetch('/api/local-pool/current', { method: 'POST' });
+        const res = await fetch('/api/local-pool/current', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: trackId })
+        });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.reason || '保存失败');
         if (data.track) S.track = data.track;
@@ -1196,20 +1213,27 @@
     btnRemoveLocal.onclick = async () => {
       const source = S.track?.recommendationSource;
       if (!S.track || source === 'removed') return;
+      const trackId = S.track.id;
       const name = S.track.name || '这首歌';
       btnRemoveLocal.disabled = true;
       btnRemoveLocal.textContent = 'BUSY';
       try {
-        const res = await fetch('/api/local-pool/remove-current', { method: 'POST' });
+        const res = await fetch('/api/local-pool/remove-current', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: trackId })
+        });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.reason || '删除失败');
         addBubble('dj', `《${name}》已从本地歌单池删除，并会永久屏蔽。`);
-        if (S.track) {
+        if (!data.track && S.track && String(S.track.id) === String(trackId)) {
           S.track = {
             ...S.track,
             recommendationSource: 'removed',
             recommendationReason: '已从本地歌单池删除'
           };
+          audio.pause();
+          setPlaying(false);
         }
         if (data.queue) renderQueue(data.queue);
       } catch (error) {
@@ -1401,17 +1425,25 @@
   // ─── Typewriter ────────────────────────────────────────────────────────────
   let twTimer = null;
 
+  function renderTypewriterText(text) {
+    djText.textContent = '';
+    djText.appendChild(document.createTextNode(text || ''));
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    djText.appendChild(cursor);
+  }
+
   function typewriter(text) {
     if (twTimer) clearInterval(twTimer);
     if (!text) {
       stopCurrentDjVoice(true);
       return;
     }
-    djText.innerHTML = '<span class="cursor"></span>';
+    renderTypewriterText('');
     let i = 0;
     twTimer = setInterval(() => {
       if (i < text.length) {
-        djText.innerHTML = text.slice(0, ++i) + '<span class="cursor"></span>';
+        renderTypewriterText(text.slice(0, ++i));
       } else {
         clearInterval(twTimer);
         twTimer = null;
@@ -1743,42 +1775,68 @@
     btnLyric.classList.remove('active');
   }
 
+  let lyricRequestId = 0;
+  let lastLyricIdx = -1;
+
+  function setLyricMessage(message, muted = false) {
+    const line = document.createElement('div');
+    line.className = 'lyric-line';
+    if (muted) line.style.color = 'var(--muted)';
+    line.textContent = message;
+    lyricScroll.replaceChildren(line);
+  }
+
   async function loadLyric(id) {
-    lyricScroll.innerHTML = '<div class="lyric-line" style="color:var(--muted)">加载中…</div>';
+    const requestId = ++lyricRequestId;
+    setLyricMessage('加载中…', true);
     try {
       const res  = await fetch(`/api/music/lyric/${id}`);
       const data = await res.json();
+      if (requestId !== lyricRequestId || String(id) !== String(S.track?.id || '')) return;
       parseLyric(data.lyric || '');
       renderLyric(-1);
     } catch {
-      lyricScroll.innerHTML = '<div class="lyric-line">暂无歌词</div>';
+      if (requestId !== lyricRequestId || String(id) !== String(S.track?.id || '')) return;
+      setLyricMessage('暂无歌词');
     }
   }
 
   function parseLyric(raw) {
     S.lyricLines = [];
+    lastLyricIdx = -1;
     for (const line of raw.split('\n')) {
-      const m = line.match(/\[(\d+):(\d+)[.:]([\d]+)\](.*)/);
-      if (m) {
-        const time = parseInt(m[1]) * 60 + parseFloat(`${m[2]}.${m[3]}`);
-        const text = m[4].trim();
-        if (text) S.lyricLines.push({ time, text });
+      const stamps = [...line.matchAll(/\[(\d+):(\d+)(?:[.:](\d+))?\]/g)];
+      if (stamps.length) {
+        const text = line.replace(/\[(\d+):(\d+)(?:[.:](\d+))?\]/g, '').trim();
+        if (!text) continue;
+        for (const stamp of stamps) {
+          const fraction = stamp[3] ? Number(`0.${stamp[3]}`) : 0;
+          const time = parseInt(stamp[1], 10) * 60 + parseInt(stamp[2], 10) + fraction;
+          S.lyricLines.push({ time, text });
+        }
       }
     }
+    S.lyricLines.sort((a, b) => a.time - b.time);
   }
 
   function renderLyric(activeIdx) {
-    lyricScroll.innerHTML = S.lyricLines.map((l, i) =>
-      `<div class="lyric-line${i === activeIdx ? ' active' : ''}">${l.text}</div>`
-    ).join('') || '<div class="lyric-line">暂无歌词</div>';
+    if (!S.lyricLines.length) {
+      setLyricMessage('暂无歌词');
+      return;
+    }
+    const nodes = S.lyricLines.map((l, i) => {
+      const line = document.createElement('div');
+      line.className = `lyric-line${i === activeIdx ? ' active' : ''}`;
+      line.textContent = l.text;
+      return line;
+    });
+    lyricScroll.replaceChildren(...nodes);
 
     if (activeIdx >= 0) {
       const el = lyricScroll.children[activeIdx];
       if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }
-
-  let lastLyricIdx = -1;
 
   function syncLyric() {
     if (!S.lyricLines.length) return;

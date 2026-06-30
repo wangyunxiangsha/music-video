@@ -29,9 +29,10 @@ assert.doesNotMatch(
   'REMOVE should stay available for external tracks so they can be blocked'
 );
 assert.match(js, /fetch\('\/api\/local-pool\/current'/);
+assert.match(js, /body:\s*JSON\.stringify\(\{\s*id:\s*trackId\s*\}\)/);
 assert.match(js, /fetch\('\/api\/local-pool\/remove-current'/);
 const removeHandler = js.match(/btnRemoveLocal\.onclick = async \(\) => \{[\s\S]*?\n    \};/)?.[0] || '';
-assert.doesNotMatch(removeHandler, /loadTrack\(/);
+assert.doesNotMatch(removeHandler, /loadTrack\(/, 'REMOVE should rely on track broadcasts instead of double-loading the response track');
 assert.doesNotMatch(
   removeHandler,
   /source === 'external'/,
@@ -40,7 +41,21 @@ assert.doesNotMatch(
 assert.match(server, /app\.post\('\/api\/local-pool\/current'/);
 assert.match(server, /app\.post\('\/api\/local-pool\/remove-current'/);
 const removeRoute = server.match(/app\.post\('\/api\/local-pool\/remove-current'[\s\S]*?\n\}\);/)?.[0] || '';
-assert.doesNotMatch(removeRoute, /nextTrack\(/);
+assert.match(
+  removeRoute,
+  /await nextTrack\(/,
+  'remove-current should immediately advance playback after blocking the current track'
+);
+assert.match(
+  removeRoute,
+  /assertCurrentTrackRequest\(req,\s*res\)/,
+  'remove-current should reject stale requests for older tracks'
+);
+assert.match(
+  server,
+  /app\.post\('\/api\/local-pool\/current'[\s\S]*assertCurrentTrackRequest\(req,\s*res\)/,
+  'save-current should reject stale requests for older tracks'
+);
 assert.doesNotMatch(
   removeRoute,
   /recommendationSource === 'external'/,
